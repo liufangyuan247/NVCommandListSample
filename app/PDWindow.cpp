@@ -1,277 +1,215 @@
 #include "PDWindow.h"
-#include <future>
-#include <mutex>
-#include <functional>
-#include <variant>
-#include "core/stb_image.h"
-#include <algorithm>
+
+#include <cstdio>
 #include <fstream>
+#include <set>
+#include <sstream>
+#include <string>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
-#include <unistd.h>
-
-using namespace std;
+#include "core/stb_image.h"
 
 namespace {
-int kSocketPort = 8891;
 
-struct DoubleFuzzingConfig {
-  double from;
-  double to;
-  double step;
-};
+std::set<std::string> extensions;
 
-DoubleFuzzingConfig stub_config;
+constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
 
-class FuzzingConfig {
- public:
-  virtual ~FuzzingConfig() = default;
-};
-
-class NumericFuzzingConfig : public FuzzingConfig {
-
-
-};
-
-void DrawFuzzingConfig(DoubleFuzzingConfig* config, const char* unit) {
-  constexpr float kInputWidget = 120.0f;
-
-  ImGui::TextUnformatted("From");
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(kInputWidget);
-  ImGui::InputDouble("##from", &config->from);
-  ImGui::SameLine(0.0, 1.0);
-  ImGui::TextUnformatted(unit);
-  ImGui::SameLine();
-  ImGui::TextUnformatted("to");
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(kInputWidget);
-  ImGui::InputDouble("##to", &config->to);
-  ImGui::SameLine(0.0, 1.0);
-  ImGui::TextUnformatted(unit);
-  ImGui::SameLine();
-  ImGui::TextUnformatted("by");
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(kInputWidget);
-  ImGui::InputDouble("##step", &config->step);
-  ImGui::SameLine(0.0, 1.0);
-  ImGui::TextUnformatted(unit);
-}
-
-void DrawFuzzingTargetList() {
-  if (ImGui::BeginCombo(u8"##fuzzing_target", u8"自车")) {
-
-    ImGui::EndCombo();
+void GetGLExtension() {
+  int extension_num = 0;
+  glGetIntegerv(GL_NUM_EXTENSIONS, &extension_num);
+  for (int i = 0; i < extension_num; ++i) {
+    std::string extension =
+        reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, i));
+    extensions.insert(extension);
+    // printf("%s\n", extension.c_str());
   }
 }
 
-void DrawFuzzingFieldList() {
-  if (ImGui::BeginCombo(u8"##fuzzing_field", u8"heading")) {
+bool ExtensionSupport(const std::string& extension_name) {
+  return extensions.find(extension_name) != extensions.end();
+}
 
-    ImGui::EndCombo();
+std::string ReadFileToString(const char* file) {
+  std::ifstream f(file);  // taking file as inputstream
+  std::string str;
+  if (f) {
+    std::ostringstream ss;
+    ss << f.rdbuf();  // reading data
+    str = ss.str();
   }
+  return str;
 }
 
-void DrawFuzzingPolicyList() {
-  if (ImGui::BeginCombo(u8"##fuzzing_policy", u8"逻辑运算")) {
-
-    ImGui::EndCombo();
+GLuint CompileShader(GLenum type, const char* vert_file) {
+  std::string src = ReadFileToString(vert_file);
+  GLuint shader = glCreateShader(type);
+  const char* src_ptr = src.c_str();
+  glShaderSource(shader, 1, &src_ptr, 0);
+  glCompileShader(shader);
+  GLint success = 0;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+  if (success != GL_TRUE) {
+    int log_len = 0;
+    std::vector<char> log;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_len);
+    log.resize(log_len + 1, 0);
+    glGetShaderInfoLog(shader, log.size(), nullptr, log.data());
+    printf("compile shader: %s error: %s\n", vert_file, log.data());
   }
+  return shader;
 }
 
-void DrawFuzzingConfigItem() {
-  ImGui::TextUnformatted(u8"泛化对象:");
-  ImGui::SameLine();
-  DrawFuzzingTargetList();
+GLuint LoadShaderProgram(const char* vert_file, const char* frag_file) {
+  std::string vert_src = ReadFileToString(vert_file);
+  std::string frag_src = ReadFileToString(frag_file);
+  
+  GLuint vert_shader = CompileShader(GL_VERTEX_SHADER, vert_file);
+  GLuint frag_shader = CompileShader(GL_FRAGMENT_SHADER, frag_file);
+  
+  GLuint program = glCreateProgram();
+  glAttachShader(program, vert_shader);
+  glAttachShader(program, frag_shader);
 
-  ImGui::TextUnformatted(u8"泛化参数:");
-  ImGui::SameLine();
-  DrawFuzzingFieldList();
+  glLinkProgram(program);
 
-  ImGui::TextUnformatted(u8"泛化机制:");
-  ImGui::SameLine();
-  ImGui::BeginGroup();
-  DrawFuzzingPolicyList();
-  DrawFuzzingConfig(&stub_config, "Km/h");
-  ImGui::EndGroup();
+  GLint success = 0;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    int log_len = 0;
+    std::vector<char> log;
+    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_len);
+    log.resize(log_len + 1, 0);
+    glGetProgramInfoLog(program, log.size(), nullptr, log.data());
+    printf("link program error: %s\n", log.data());
+  }
+
+  glDetachShader(program, vert_shader);
+  glDetachShader(program, frag_shader);
+
+  glDeleteShader(vert_shader);
+  glDeleteShader(frag_shader);
+
+  return program;
 }
 
-}
+}  // namespace
 
 PDWindow::~PDWindow() {}
 
-PDWindow::PDWindow()
-  : Window(u8"ProtoTyping") {
-}
+PDWindow::PDWindow() : Window(u8"NVCommandListDemo") {}
 
 void PDWindow::onInitialize() {
   Window::onInitialize();
-
   ImGui::StyleColorsDark();
+  GetGLExtension();
 
-  loadTextures();
+  command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
 
-  socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-
-  sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(kSocketPort);
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-  if (bind(socket_, (sockaddr*)&addr, sizeof(addr)) == -1) {
-    printf("bind error");
-  }
-  std::thread([this]() {
-    struct timeval timeout = {1, 0};  // 1s
-    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    while (true) {
-      char buf[1024];
-      int len = recv(socket_, buf, sizeof(buf), 0);
-      if (len > 0) {
-        std::string text;
-        // to ascii
-        for (int i = 0; i < len; i++) {
-          if (buf[i] >= 0x20 && buf[i] <= 0x7e) {
-            text += buf[i];
-          }
-        }
-        printf("recv: %s\n", text.c_str());
-      }
-    }
-  }).detach();
-}
-
-void PDWindow::onRender() {
-  glClearColor(0.8, 0.8, 0.8, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
-}
-
-void PDWindow::onUIUpdate() {
-  Window::onUIUpdate();
-
-  ImGui::ShowDemoWindow();
-
-  static int editing_signal_index = -1;
-  static int trigger_type = 0;
-  static glm::vec3 trigger_pos;
-  static float trigger_distance;
-  static char time_text[1024];
-  static bool pinning = false;
-  static function<void(glm::vec3)> on_position_selected;
-
-  static int page_id = 0;
-  constexpr const char* kPageName[] = {
-    u8"参数配置",
-    u8"泛化结果",
+  // Initialize mesh data
+  struct VertexAttribs {
+    glm::vec3 pos;
+    unsigned char color[4];
   };
 
-  ImGui::Begin(u8"泛化");
-  ImGui::TextUnformatted(u8"| 泛化配置");
+  VertexAttribs mesh[] = {
+    {{0, 1, 0}, {255, 0, 0, 255} },
+    {{-1, -1, 0}, {0, 255, 0, 255} },
+    {{1, -1, 0}, {0, 0, 255, 255} },    
+  };
 
-  const float widget_width = ImGui::GetWindowContentRegionWidth();
-  const float spacing = 20.0f;
-  const float content_start_x = 200.0f;
-  const float gizmo_start_x = widget_width - 50.0f;
-  const float content_width = gizmo_start_x - content_start_x - spacing;
-  const float table_row_height = ImGui::GetTextLineHeightWithSpacing();
+  glGenVertexArrays(1, &vao_);
+  glBindVertexArray(vao_);
+  glGenBuffers(1, &vbo_);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(mesh), &mesh, GL_STATIC_DRAW);
 
-  if (ImGui::BeginTabBar("##PageTab")) {
-    for (int i = 0; i < 2; ++i) {
-      bool opened = page_id == i;
-      if (ImGui::BeginTabItem(kPageName[i], nullptr)) {
-        page_id = i;
-        ImGui::EndTabItem();
-      }
-    }
-    ImGui::EndTabBar();
-  }
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(VertexAttribs), 0);
+  glVertexAttribDivisor(0,0);
 
-  if (page_id == 0) {
-    for (int i = 0; i < 2; ++i) {
-      ImGui::PushID(i);
-      DrawFuzzingConfigItem();
-      ImGui::Separator();
-      ImGui::PopID();
-    }
-  }
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VertexAttribs), (void*)(sizeof(glm::vec3)));
 
-  if (page_id == 1) {
-    ImGui::Columns(3, "##fuzzing_testcase");
-    ImGui::Text(u8"Index");
-    ImGui::NextColumn();
-    ImGui::Text(u8"Config");
-    ImGui::NextColumn();
-    ImGui::Text(u8"Action");
-    ImGui::NextColumn();
+  glBindVertexArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    for (int j = 0; j < 10; ++j) {
-      for (int i = 0; i < 10; ++i) {
-        int idx = j * 10 + i;
-        ImGui::PushID(idx);
-        ImGui::Text("#%d", idx);
-        ImGui::NextColumn();
-        ImGui::Text("ego speed xxx Km/h | obstacle #%d speed xxx Km/h", j);
-        ImGui::NextColumn();
-        ImGui::SmallButton(u8"预览");
-        ImGui::SameLine();
-        ImGui::SmallButton(u8"本地运行");
-        ImGui::SameLine();
-        ImGui::SmallButton(u8"移除");
-        ImGui::NextColumn();
-        ImGui::PopID();
-      }
-    }
-    
-  }
 
-  int signal_count = 20;
-  ImVec2 window_pos = ImGui::GetWindowPos();
-  float window_scroll_x = ImGui::GetScrollX();
-  float window_scroll_y = ImGui::GetScrollY();
+  // UBO
+  glGenBuffers(1, &scene_ubo_);
+  glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, scene_ubo_);
 
-  ImGui::End();
-  
-  if (pinning) {
-    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    if (ImGui::IsMouseDown(0)) {
-      pinning = false;
-      if (on_position_selected) {
-        on_position_selected(glm::vec3(ImGui::GetMousePos().x, ImGui::GetMousePos().y, 0));
-        on_position_selected = nullptr;
-      }
-    }
-  }
+  glGenBuffers(1, &object_ubo_);
+  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(ObjectData), nullptr, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 1, object_ubo_);
+
+  // Load shaders
+  normal_shader_ = LoadShaderProgram("assets/shaders/colored.vert.glsl", "assets/shaders/colored.frag.glsl");
+
+
+  glClearColor(0.2, 0.2, 0.2, 1);
+  glClearDepth(1.0);
 }
 
 void PDWindow::onUpdate() {
   Window::onUpdate();
+
+  // Compute VP matrix
+  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.1f, 5.0f);
+  glm::mat4 view = glm::lookAt(glm::vec3(0, 0, -2), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+
+  scene_data_.VP = projection * view;
+
+  glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
+  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SceneData), &scene_data_);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
+
+void PDWindow::onRender() {
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  switch (method_) {
+    case kBasic:
+      DrawTriangleBasic();
+      break;
+    case kCommandList:
+      DrawTriangleCommandList();
+      break;
+  }
+}
+
+void PDWindow::onUIUpdate() { Window::onUIUpdate(); }
 
 void PDWindow::onResize(int w, int h) {
   Window::onResize(w, h);
+  glViewport(0, 0, w, h);
 }
 
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
-void PDWindow::loadTextures() {
-  {
-    int w, h;
-    auto data = stbi_load(u8"assets/ui/区域.png", &w, &h, 0, 4);
-    if (data) {
-      areaIcon.Create(1, w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, data);
-      free(data);
-    }
-  }
-  {
-    int w, h;
-    auto data = stbi_load(u8"assets/ui/pin.png", &w, &h, 0, 4);
-    if (data) {
-      pinIcon.Create(1, w, h, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, data);
-      free(data);
-    }
-  }
+void PDWindow::DrawTriangleBasic() {
+  object_data_.M = glm::rotate(glm::mat4(1.0), Time::time(), glm::vec3(0, 1, 0));
+
+  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data_);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  glUseProgram(normal_shader_);
+  glBindVertexArray(vao_);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glBindVertexArray(0);
+  glUseProgram(0);
 }
+
+void PDWindow::DrawTriangleCommandList() {}
 
 #undef min
 #undef max

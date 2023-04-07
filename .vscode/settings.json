@@ -1,5 +1,6 @@
 {
   "files.associations": {
+    "*.glsl": "glsl",
     "unordered_map": "cpp",
     "unordered_set": "cpp",
     "cctype": "cpp",
@@ -65,6 +66,8 @@
     "set": "cpp",
     "string": "cpp",
     "bit": "cpp",
-    "variant": "cpp"
+    "variant": "cpp",
+    "forward_list": "cpp",
+    "*.ipp": "cpp"
   }
 }

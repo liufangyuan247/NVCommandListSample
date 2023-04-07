@@ -1,23 +1,18 @@
 #pragma once
-#include <random>
-#include <memory>
-#include <vector>
-#include <stack>
 #include <map>
-#include "core/Window.h"
-#include "core/Texture2D.h"
-#include <arpa/inet.h>
-#include <sys/socket.h>
+#include <memory>
+#include <random>
+#include <stack>
 #include <thread>
+#include <vector>
+
+#include <glm/glm.hpp>
+
+#include "core/Texture2D.h"
+#include "core/Window.h"
 
 class PDWindow : public Window {
-  Texture2D areaIcon;
-  Texture2D pinIcon;
-
-  void loadTextures();
-
-  int socket_ = -1;
-public:
+ public:
   PDWindow();
   ~PDWindow();
   virtual void onInitialize();
@@ -26,4 +21,31 @@ public:
   virtual void onUpdate();
   virtual void onResize(int w, int h);
   virtual void onEndFrame();
+
+ private:
+  void DrawTriangleBasic();
+  void DrawTriangleCommandList();
+
+  struct SceneData {
+    glm::mat4 VP;
+  } scene_data_;
+  GLuint scene_ubo_;
+
+  struct ObjectData {
+    glm::mat4 M;
+  } object_data_;
+  GLuint object_ubo_;
+
+  enum DrawMethod {
+    kBasic,
+    kCommandList,
+  } method_ = kBasic;
+
+  bool command_list_supported_ = false;
+
+  GLuint vao_;
+  GLuint vbo_;
+
+  GLuint normal_shader_;
+  GLuint command_list_shader_;
 };
