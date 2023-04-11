@@ -23,8 +23,8 @@ class PDWindow : public Window {
   virtual void onEndFrame();
 
  private:
-  void DrawTriangleBasic();
-  void DrawTriangleCommandList();
+  void DrawSceneBasic();
+  void DrawSceneCommandList();
 
   struct SceneData {
     glm::mat4 VP;

@@ -179,10 +179,10 @@ void PDWindow::onRender() {
 
   switch (draw_method_) {
     case kBasic:
-      DrawTriangleBasic();
+      DrawSceneBasic();
       break;
     case kCommandList:
-      DrawTriangleCommandList();
+      DrawSceneCommandList();
       break;
   }
 }
@@ -210,7 +210,7 @@ void PDWindow::onResize(int w, int h) {
 
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
-void PDWindow::DrawTriangleBasic() {
+void PDWindow::DrawSceneBasic() {
   object_data_.M = glm::rotate(glm::mat4(1.0), Time::time(), glm::vec3(0, 1, 0));
 
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
@@ -224,7 +224,7 @@ void PDWindow::DrawTriangleBasic() {
   glUseProgram(0);
 }
 
-void PDWindow::DrawTriangleCommandList() {
+void PDWindow::DrawSceneCommandList() {
 
 }
 
