@@ -8,9 +8,12 @@
 
 #include <glm/glm.hpp>
 
+#include "app/RenderObject.h"
 #include "core/Texture2D.h"
 #include "core/Window.h"
+#include "core/camera.h"
 #include "core/mesh_renderer.h"
+#include "core/shader_manager.h"
 
 class PDWindow : public Window {
  public:
@@ -44,10 +47,8 @@ class PDWindow : public Window {
 
   bool command_list_supported_ = false;
 
-  MeshRenderer mesh_renderer_;
+  std::vector<std::unique_ptr<RenderObject>> render_objects_;
 
-  GLuint normal_shader_;
-  GLuint command_list_shader_;
-
-  std::map<std::string, GLuint> shader_name_;
+  Camera camera_;
+  ShaderManager shader_manager_;
 };

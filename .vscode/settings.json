@@ -68,6 +68,8 @@
     "bit": "cpp",
     "variant": "cpp",
     "forward_list": "cpp",
-    "*.ipp": "cpp"
+    "*.ipp": "cpp",
+    "codecvt": "cpp",
+    "filesystem": "cpp"
   }
 }

@@ -1,21 +1,24 @@
 #include "PDWindow.h"
 
 #include <cstdio>
+#include <experimental/filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
 
 #include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "core/stb_image.h"
 
 namespace {
 
+namespace fs = std::experimental::filesystem;
 std::set<std::string> extensions;
 
+constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
 constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
 
 void GetGLExtension() {
@@ -33,67 +36,36 @@ bool ExtensionSupport(const std::string& extension_name) {
   return extensions.find(extension_name) != extensions.end();
 }
 
-std::string ReadFileToString(const char* file) {
-  std::ifstream f(file);  // taking file as inputstream
-  std::string str;
-  if (f) {
-    std::ostringstream ss;
-    ss << f.rdbuf();  // reading data
-    str = ss.str();
+nlohmann::json LoadJsonFromFile(const fs::path& path) {
+  nlohmann::json json;
+  std::ifstream ifs(path.string());
+  if (ifs) {
+    ifs >> json;
+  } else {
+    printf("open file error: %s\n", path.string().c_str());
   }
-  return str;
+  return json;
 }
 
-GLuint CompileShader(GLenum type, const char* vert_file) {
-  std::string src = ReadFileToString(vert_file);
-  GLuint shader = glCreateShader(type);
-  const char* src_ptr = src.c_str();
-  glShaderSource(shader, 1, &src_ptr, 0);
-  glCompileShader(shader);
-  GLint success = 0;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-  if (success != GL_TRUE) {
-    int log_len = 0;
-    std::vector<char> log;
-    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_len);
-    log.resize(log_len + 1, 0);
-    glGetShaderInfoLog(shader, log.size(), nullptr, log.data());
-    printf("compile shader: %s error: %s\n", vert_file, log.data());
+std::vector<std::unique_ptr<RenderObject>> LoadMapData(
+    const std::string& map_directory) {
+  std::vector<std::unique_ptr<RenderObject>> objects;
+  for (auto& directory_entry :
+       fs::directory_iterator(fs::path(map_directory))) {
+    nlohmann::json json = LoadJsonFromFile(directory_entry.path());
+    if (json == nlohmann::json()) {
+      printf("parsing json error: %s\n", directory_entry.path().string().c_str());
+      continue;
+    } else {
+      // printf("parsing file: %s\n", directory_entry.path().string().c_str());
+      auto object = CreateRenderObjectFromJson(json);
+      if (object) {
+        object->Initialize();
+        objects.push_back(std::move(object));
+      }
+    }
   }
-  return shader;
-}
-
-GLuint LoadShaderProgram(const char* vert_file, const char* frag_file) {
-  std::string vert_src = ReadFileToString(vert_file);
-  std::string frag_src = ReadFileToString(frag_file);
-  
-  GLuint vert_shader = CompileShader(GL_VERTEX_SHADER, vert_file);
-  GLuint frag_shader = CompileShader(GL_FRAGMENT_SHADER, frag_file);
-  
-  GLuint program = glCreateProgram();
-  glAttachShader(program, vert_shader);
-  glAttachShader(program, frag_shader);
-
-  glLinkProgram(program);
-
-  GLint success = 0;
-  glGetProgramiv(program, GL_LINK_STATUS, &success);
-  if (success != GL_TRUE) {
-    int log_len = 0;
-    std::vector<char> log;
-    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_len);
-    log.resize(log_len + 1, 0);
-    glGetProgramInfoLog(program, log.size(), nullptr, log.data());
-    printf("link program error: %s\n", log.data());
-  }
-
-  glDetachShader(program, vert_shader);
-  glDetachShader(program, frag_shader);
-
-  glDeleteShader(vert_shader);
-  glDeleteShader(frag_shader);
-
-  return program;
+  return objects;
 }
 
 }  // namespace
@@ -104,28 +76,22 @@ PDWindow::PDWindow() : Window(u8"NVCommandListDemo") {}
 
 void PDWindow::onInitialize() {
   Window::onInitialize();
+
+  render_objects_ = LoadMapData(kMapDataFolder);
+  printf("total render object count:%d\n", render_objects_.size());
+
   ImGui::StyleColorsDark();
   GetGLExtension();
 
+  int max_uniform_buffer_size = 0;
+  glGetIntegerv(GL_UNIFORM_BUFFER_SIZE, &max_uniform_buffer_size);
+  printf("max_uniform_buffer_size: %d\n", max_uniform_buffer_size);
+
+  int uniform_buffer_offset_alignment = 0;
+  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniform_buffer_offset_alignment);
+  printf("uniform_buffer_offset_alignment: %d\n", uniform_buffer_offset_alignment);
+
   command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
-
-  // Initialize mesh data
-  // struct VertexAttribs {
-  //   glm::vec3 pos;
-  //   unsigned char color[4];
-  // };
-
-  // VertexAttribs mesh[] = {
-  //   {{0, 1, 0}, {255, 0, 0, 255} },
-  //   {{-1, -1, 0}, {0, 255, 0, 255} },
-  //   {{1, -1, 0}, {0, 0, 255, 255} },    
-  // };
-
-  Mesh mesh;
-  mesh.set_positions({{0, 1, 0}, {-1, -1, 0}, {1, -1, 0}});
-  mesh.set_colors({{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}});
-  mesh_renderer_.set_mesh(std::move(mesh));
-  mesh_renderer_.Initialize();
 
   // UBO
   glGenBuffers(1, &scene_ubo_);
@@ -140,28 +106,74 @@ void PDWindow::onInitialize() {
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
   glBindBufferBase(GL_UNIFORM_BUFFER, 1, object_ubo_);
 
-  // Load shaders
-  normal_shader_ = LoadShaderProgram("assets/shaders/colored.vert.glsl", "assets/shaders/colored.frag.glsl");
-  command_list_shader_ = LoadShaderProgram("assets/shaders/colored_cl.vert.glsl", "assets/shaders/colored_cl.frag.glsl");
+  shader_manager_.LoadShaderForName(
+      "unlit_vertex_colored", "assets/shaders/unlit_vertex_colored.vert.glsl",
+      "assets/shaders/unlit_vertex_colored.frag.glsl");
+  shader_manager_.LoadShaderForName(
+      "unlit_colored", "assets/shaders/unlit_colored_default.vert.glsl",
+      "assets/shaders/unlit_colored_default.frag.glsl");
+  shader_manager_.LoadShaderForName("unlit_vertex_colored_command_list",
+                                    "assets/shaders/colored_cl.vert.glsl",
+                                    "assets/shaders/colored_cl.frag.glsl");
+  shader_manager_.LoadShaderForName(
+      "simple_texture_object", "assets/shaders/simple_textured_object.vert.glsl",
+      "assets/shaders/simple_textured_object.frag.glsl");
 
-  shader_name_["unlit_color"] = normal_shader_;
-
-  glClearColor(0.5, 0.5, 0.5, 1);
+  glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
 }
 
 void PDWindow::onUpdate() {
   Window::onUpdate();
 
+  // Process camera update
+  {
+    glm::vec3 forward = camera_.forward();
+    glm::vec3 right = camera_.right();
+
+    float speed = input.Shift() ? 100.0f : 1.0f;
+    float dis = speed * Time::deltaTime();
+
+    glm::vec3 target = camera_.target();
+    if (input.getKey(GLFW_KEY_A)) {
+      target -= right * dis;
+    }
+    if (input.getKey(GLFW_KEY_D)) {
+      target += right * dis;
+    }
+    if (input.getKey(GLFW_KEY_W)) {
+      target += forward * dis;
+    }
+    if (input.getKey(GLFW_KEY_S)) {
+      target -= forward * dis;
+    }
+    camera_.set_target(target);
+
+    if (input.getButton(GLFW_MOUSE_BUTTON_LEFT) && !input.blockedByUI()) {
+      const float sensitivity = 0.1f;
+      glm::vec2 picth_yaw = camera_.look_pitch_yaw();
+      picth_yaw += glm::vec2{-input.deltaY(), input.deltaX()} * sensitivity;
+      picth_yaw.x = glm::clamp(picth_yaw.x, -90.0f, 90.0f);
+      camera_.set_look_pitch_yaw(picth_yaw);
+    }
+  }
+
   // Compute VP matrix
-  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.1f, 5.0f);
-  glm::mat4 view = glm::lookAt(glm::vec3(0, 0, -2), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.01f, 5000.0f);
+  glm::mat4 view = camera_.view();
 
   scene_data_.VP = projection * view;
 
   glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
   glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SceneData), &scene_data_);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  for (auto& k_v : shader_manager_.loaded_programs()) {
+    glUseProgram(k_v.second);
+    int VP_loc = glGetUniformLocation(k_v.second, "VP");
+    glUniformMatrix4fv(VP_loc, 1, GL_FALSE, glm::value_ptr(scene_data_.VP));
+    glUseProgram(0);
+  }
 }
 
 void PDWindow::onRender() {
@@ -179,6 +191,8 @@ void PDWindow::onRender() {
 
 void PDWindow::onUIUpdate() {
   Window::onUIUpdate();
+  ImGui::ShowDemoWindow();
+
   const char* combos[] = {
     "Normal",
     "Command List",
@@ -201,15 +215,16 @@ void PDWindow::onResize(int w, int h) {
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
 void PDWindow::DrawSceneBasic() {
-  object_data_.M = glm::rotate(glm::mat4(1.0), Time::time(), glm::vec3(0, 1, 0));
+  //object_data_.M = glm::rotate(glm::mat4(1.0), Time::time(), glm::vec3(0, 1, 0));
+  object_data_.M = glm::mat4(1.0);
 
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
   glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data_);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-  glUseProgram(normal_shader_);
-  mesh_renderer_.Render();
-  glUseProgram(0);
+  for (auto& object : render_objects_) {
+    object->Render(shader_manager_);
+  }
 }
 
 void PDWindow::DrawSceneCommandList() {
