@@ -31,54 +31,80 @@ class MeshRenderer {
 
     glBindVertexArray(vao_);
 
-    int position_size = mesh_.positions().size() * sizeof(Mesh::PositionType);
-    int color_size = mesh_.colors().size() * sizeof(Mesh::ColorType);
-    int uv_size = mesh_.uvs().size() * sizeof(Mesh::UVType);
+    // Build interleaved buffer data
+    struct VertexAttribData {
+      int attrib_location;
+      GLenum attrib_type;
+      int component_size;
+      GLenum normalized;
+      int element_offset;
+      int element_size;
+      const void* source;
+    };
 
-    int total_size = position_size + color_size + uv_size;
+    int current_offset = 0;
+    std::vector<VertexAttribData> vertex_attribs;
+    vertex_attribs.push_back(
+        VertexAttribData{.attrib_location = Mesh::POSITION,
+                         .attrib_type = GL_FLOAT,
+                         .component_size = 3,
+                         .normalized = GL_FALSE,
+                         .element_offset = current_offset,
+                         .element_size = sizeof(Mesh::PositionType),
+                         .source = mesh_.positions().data()});
+
+    if (mesh_.colors().size()) {
+      current_offset += vertex_attribs.back().element_size;
+      vertex_attribs.push_back(
+          VertexAttribData{.attrib_location = Mesh::COLOR,
+                           .attrib_type = GL_UNSIGNED_BYTE,
+                           .component_size = 4,
+                           .normalized = GL_TRUE,
+                           .element_offset = current_offset,
+                           .element_size = sizeof(Mesh::ColorType),
+                           .source = mesh_.colors().data()});
+    }
+
+    if (mesh_.uvs().size()) {
+      current_offset += vertex_attribs.back().element_size;
+      vertex_attribs.push_back(
+          VertexAttribData{.attrib_location = Mesh::UV,
+                           .attrib_type = GL_FLOAT,
+                           .component_size = 2,
+                           .normalized = GL_FALSE,
+                           .element_offset = current_offset,
+                           .element_size = sizeof(Mesh::UVType),
+                           .source = mesh_.uvs().data()});
+    }
+    current_offset += vertex_attribs.back().element_size;
+
+    int vertex_count = mesh_.positions().size();
+    int stride = current_offset;
+    int total_size = stride * vertex_count;
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, total_size, 0, GL_STATIC_DRAW);
 
-    glBufferSubData(GL_ARRAY_BUFFER, 0,
-                    position_size,
-                    mesh_.positions().data());
-    glEnableVertexAttribArray(Mesh::POSITION);
-    // glVertexAttribFormat(Mesh::POSITION, 3, GL_FLOAT, GL_FALSE, 0);
-    // glVertexAttribBinding(Mesh::POSITION,0);
-    // glBindVertexBuffer(0, vbo_, 0, 0);
-    glVertexAttribPointer(Mesh::POSITION, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    void *buffer = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    for (const auto& attrib_data : vertex_attribs) {
+      // Copy data
+      for (int i = 0; i < vertex_count; ++i) {
+        void* dst_ptr = buffer + (i * stride) + attrib_data.element_offset;
+        const void* src_ptr = attrib_data.source + i * attrib_data.element_size;
+        memcpy(dst_ptr, src_ptr, attrib_data.element_size);
+      }
 
-    if (mesh_.colors().size()) {
-      glBufferSubData(GL_ARRAY_BUFFER, position_size,
-                      color_size,
-                      mesh_.colors().data());
-      glEnableVertexAttribArray(Mesh::COLOR);
-      // glVertexAttribFormat(Mesh::COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0);
-      // glVertexAttribBinding(Mesh::COLOR, Mesh::COLOR);
-      // glBindVertexBuffer(Mesh::COLOR, vbo_, position_size, 0);
-      glVertexAttribPointer(Mesh::COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0,
-                            (void *)(position_size));
+      // Set up attrib format
+      glEnableVertexAttribArray(attrib_data.attrib_location);
+      glVertexAttribFormat(attrib_data.attrib_location,
+                           attrib_data.component_size, attrib_data.attrib_type,
+                           attrib_data.normalized, attrib_data.element_offset);
+      glVertexAttribBinding(attrib_data.attrib_location, 0);
     }
+    glUnmapBuffer(GL_ARRAY_BUFFER);
 
-    if (mesh_.uvs().size()) {
-      glBufferSubData(GL_ARRAY_BUFFER, position_size + color_size,
-                      uv_size,
-                      mesh_.uvs().data());
-      glEnableVertexAttribArray(Mesh::UV);
-      // glVertexAttribFormat(Mesh::UV, 2, GL_FLOAT, GL_FALSE, 0);
-      // glVertexAttribBinding(Mesh::UV, Mesh::UV);
-      // glBindVertexBuffer(Mesh::UV, vbo_, position_size + color_size, 0);
-      glVertexAttribPointer(Mesh::UV, 2, GL_FLOAT, GL_FALSE, 0,
-                            (void *)(position_size + color_size));
-    }
-
-    if (mesh_.indexed_draw()) {
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                   mesh_.indices().size() * sizeof(Mesh::IndexType),
-                   mesh_.indices().data(), GL_STATIC_DRAW);
-    }
+    glBindVertexBuffer(0, vbo_, 0, stride);
+    glVertexBindingDivisor(0, 0);
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
