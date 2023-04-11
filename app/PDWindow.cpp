@@ -1,11 +1,15 @@
 #include "PDWindow.h"
 
+#include <atomic>
 #include <cstdio>
+#include <chrono>
 #include <experimental/filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <thread>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,11 +19,30 @@
 
 namespace {
 
+using milli = std::chrono::milliseconds;
 namespace fs = std::experimental::filesystem;
 std::set<std::string> extensions;
 
-constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
+// constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
+constexpr const char kMapDataFolder[] = "assets/dumped_map_data_compact";
 constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
+
+class ProfileTimer {
+ public:
+  ProfileTimer(const std::string& entry_name) : entry_name_(entry_name) {
+    start_ = std::chrono::high_resolution_clock::now();
+  }
+  ~ProfileTimer() {
+    auto finish = std::chrono::high_resolution_clock::now();
+    std::cout << entry_name_ << " took "
+              << std::chrono::duration_cast<milli>(finish - start_).count()
+              << " milliseconds\n";
+  }
+
+ private:
+  std::string entry_name_;
+  std::chrono::time_point<std::chrono::system_clock> start_;
+};
 
 void GetGLExtension() {
   int extension_num = 0;
@@ -47,8 +70,58 @@ nlohmann::json LoadJsonFromFile(const fs::path& path) {
   return json;
 }
 
+void LoadMapDataThreaded(const std::vector<fs::path>& files,
+                         std::vector<std::unique_ptr<RenderObject>>& objects,
+                         std::atomic_int& slot_idx) {
+  while (true) {
+    int current_slot_idx = slot_idx++;
+    if (current_slot_idx >= files.size()) {
+      break;
+    }
+    nlohmann::json json = LoadJsonFromFile(files[current_slot_idx]);
+    if (json == nlohmann::json()) {
+      printf("parsing json error: %s\n",
+             files[current_slot_idx].string().c_str());
+      continue;
+    } else {
+      // printf("parsing file: %s\n", directory_entry.path().string().c_str());
+      auto object = CreateRenderObjectFromJson(json);
+      if (object) {
+        // object->Initialize();
+        objects[current_slot_idx] = std::move(object);
+      }
+    }
+  }
+}
+
+#define MULTI_THREAD
 std::vector<std::unique_ptr<RenderObject>> LoadMapData(
     const std::string& map_directory) {
+#ifdef MULTI_THREAD
+  std::vector<fs::path> files;
+  for (auto& directory_entry :
+       fs::directory_iterator(fs::path(map_directory))) {
+    files.push_back(directory_entry.path());
+  }
+
+  std::vector<std::unique_ptr<RenderObject>> objects(files.size());
+  std::atomic_int slot_idx{0};
+  const int kThreadCount = 15;
+  std::vector<std::thread> threads;
+
+  for (int i = 0; i < kThreadCount; ++i) {
+    threads.push_back(
+        std::thread([&]() { LoadMapDataThreaded(files, objects, slot_idx); }));
+  }
+  LoadMapDataThreaded(files, objects, slot_idx);
+  for (int i = 0; i < kThreadCount; ++i) {
+    threads[i].join();
+  }
+
+  for (auto& object : objects) {
+    object->Initialize();
+  }
+#else
   std::vector<std::unique_ptr<RenderObject>> objects;
   for (auto& directory_entry :
        fs::directory_iterator(fs::path(map_directory))) {
@@ -65,6 +138,7 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
       }
     }
   }
+#endif
   return objects;
 }
 
@@ -77,7 +151,11 @@ PDWindow::PDWindow() : Window(u8"NVCommandListDemo") {}
 void PDWindow::onInitialize() {
   Window::onInitialize();
 
-  render_objects_ = LoadMapData(kMapDataFolder);
+  {
+    ProfileTimer timer("LoadMapData");
+    render_objects_ = LoadMapData(kMapDataFolder);
+  }
+
   printf("total render object count:%d\n", render_objects_.size());
 
   ImGui::StyleColorsDark();
