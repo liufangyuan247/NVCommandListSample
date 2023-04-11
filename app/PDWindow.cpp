@@ -137,7 +137,6 @@ void PDWindow::onInitialize() {
   glBindVertexArray(0);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-
   // UBO
   glGenBuffers(1, &scene_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
@@ -153,9 +152,11 @@ void PDWindow::onInitialize() {
 
   // Load shaders
   normal_shader_ = LoadShaderProgram("assets/shaders/colored.vert.glsl", "assets/shaders/colored.frag.glsl");
+  command_list_shader_ = LoadShaderProgram("assets/shaders/colored_cl.vert.glsl", "assets/shaders/colored_cl.frag.glsl");
 
+  shader_name_["unlit_color"] = normal_shader_;
 
-  glClearColor(0.2, 0.2, 0.2, 1);
+  glClearColor(0.5, 0.5, 0.5, 1);
   glClearDepth(1.0);
 }
 
@@ -176,7 +177,7 @@ void PDWindow::onUpdate() {
 void PDWindow::onRender() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-  switch (method_) {
+  switch (draw_method_) {
     case kBasic:
       DrawTriangleBasic();
       break;
@@ -186,7 +187,21 @@ void PDWindow::onRender() {
   }
 }
 
-void PDWindow::onUIUpdate() { Window::onUIUpdate(); }
+void PDWindow::onUIUpdate() {
+  Window::onUIUpdate();
+  const char* combos[] = {
+    "Normal",
+    "Command List",
+  };
+
+  ImGui::Begin(u8"设置");
+  int current_method = draw_method_;
+  if (ImGui::Combo(u8"Draw Method", &current_method, combos, 2)) {
+    draw_method_ = static_cast<DrawMethod>(current_method);
+  }
+
+  ImGui::End();
+}
 
 void PDWindow::onResize(int w, int h) {
   Window::onResize(w, h);
@@ -209,7 +224,9 @@ void PDWindow::DrawTriangleBasic() {
   glUseProgram(0);
 }
 
-void PDWindow::DrawTriangleCommandList() {}
+void PDWindow::DrawTriangleCommandList() {
+
+}
 
 #undef min
 #undef max

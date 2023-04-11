@@ -37,9 +37,9 @@ class PDWindow : public Window {
   GLuint object_ubo_;
 
   enum DrawMethod {
-    kBasic,
+    kBasic = 0,
     kCommandList,
-  } method_ = kBasic;
+  } draw_method_ = kBasic;
 
   bool command_list_supported_ = false;
 
@@ -48,4 +48,6 @@ class PDWindow : public Window {
 
   GLuint normal_shader_;
   GLuint command_list_shader_;
+
+  std::map<std::string, GLuint> shader_name_;
 };
