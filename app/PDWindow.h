@@ -10,6 +10,7 @@
 
 #include "core/Texture2D.h"
 #include "core/Window.h"
+#include "core/mesh_renderer.h"
 
 class PDWindow : public Window {
  public:
@@ -43,8 +44,7 @@ class PDWindow : public Window {
 
   bool command_list_supported_ = false;
 
-  GLuint vao_;
-  GLuint vbo_;
+  MeshRenderer mesh_renderer_;
 
   GLuint normal_shader_;
   GLuint command_list_shader_;

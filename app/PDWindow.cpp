@@ -110,32 +110,22 @@ void PDWindow::onInitialize() {
   command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
 
   // Initialize mesh data
-  struct VertexAttribs {
-    glm::vec3 pos;
-    unsigned char color[4];
-  };
+  // struct VertexAttribs {
+  //   glm::vec3 pos;
+  //   unsigned char color[4];
+  // };
 
-  VertexAttribs mesh[] = {
-    {{0, 1, 0}, {255, 0, 0, 255} },
-    {{-1, -1, 0}, {0, 255, 0, 255} },
-    {{1, -1, 0}, {0, 0, 255, 255} },    
-  };
+  // VertexAttribs mesh[] = {
+  //   {{0, 1, 0}, {255, 0, 0, 255} },
+  //   {{-1, -1, 0}, {0, 255, 0, 255} },
+  //   {{1, -1, 0}, {0, 0, 255, 255} },    
+  // };
 
-  glGenVertexArrays(1, &vao_);
-  glBindVertexArray(vao_);
-  glGenBuffers(1, &vbo_);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(mesh), &mesh, GL_STATIC_DRAW);
-
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(VertexAttribs), 0);
-  glVertexAttribDivisor(0,0);
-
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VertexAttribs), (void*)(sizeof(glm::vec3)));
-
-  glBindVertexArray(0);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  Mesh mesh;
+  mesh.set_positions({{0, 1, 0}, {-1, -1, 0}, {1, -1, 0}});
+  mesh.set_colors({{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}});
+  mesh_renderer_.set_mesh(std::move(mesh));
+  mesh_renderer_.Initialize();
 
   // UBO
   glGenBuffers(1, &scene_ubo_);
@@ -218,9 +208,7 @@ void PDWindow::DrawSceneBasic() {
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
   glUseProgram(normal_shader_);
-  glBindVertexArray(vao_);
-  glDrawArrays(GL_TRIANGLES, 0, 3);
-  glBindVertexArray(0);
+  mesh_renderer_.Render();
   glUseProgram(0);
 }
 

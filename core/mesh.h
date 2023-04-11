@@ -46,7 +46,7 @@ class Mesh {
   std::vector<PositionType> positions_;
   std::vector<ColorType> colors_;
   std::vector<UVType> uvs_;
-  std::vectorIndexType> indices_;
+  std::vector<IndexType> indices_;
   GLenum draw_mode_ = GL_TRIANGLES;
 
 };
