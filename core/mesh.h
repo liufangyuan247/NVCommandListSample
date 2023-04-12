@@ -5,6 +5,7 @@
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 
+#include "app/common.h"
 #include "app/json.hpp"
 #include "app/base64.h"
 
@@ -19,12 +20,6 @@ inline VecType VecFromJson(const nlohmann::json& json) {
 
 class Mesh {
  public:
-  enum AttribIndex {
-    POSITION,
-    COLOR,
-    UV
-  };
-
   using PositionType = glm::vec3;
   using ColorType = glm::u8vec4;
   using UVType = glm::vec2;

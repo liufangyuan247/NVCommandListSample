@@ -21,9 +21,17 @@ inline MatType MatFromJson(const nlohmann::json& json) {
 
 class RenderObject {
  public:
+  using PreRenderCallback = std::function<bool(const RenderObject*)>;
+  using PostRenderCallback = std::function<void(const RenderObject*)>;
+
+  virtual ~RenderObject() = default;
+
   virtual void SerializeFromJson(const nlohmann::json& json) {}
   virtual void Initialize() {}
   virtual void Render(const ShaderManager& shader_manager) {}
+  virtual void RenderCustom(const ShaderManager& shader_manager,
+                            PreRenderCallback pre_render = nullptr,
+                            PostRenderCallback post_render = nullptr) {}
 
   void set_world(const glm::mat4& world) { world_ = world; }
   const glm::mat4& world() const { return world_; }
@@ -106,6 +114,30 @@ class LineObject : public RenderObject {
     }
   }
 
+  void RenderCustom(const ShaderManager& shader_manager,
+                    PreRenderCallback pre_render = nullptr,
+                    PostRenderCallback post_render = nullptr) override {
+    if (pre_render && !pre_render(this)) {
+      return;
+    }
+    glLineWidth(line_style_.line_width);
+    if (line_style_.line_stipple) {
+      glEnable(GL_LINE_STIPPLE);
+      glLineStipple(line_style_.line_stipple_factor,
+                    line_style_.line_stipple_pattern);
+    }
+
+    mesh_renderer_.Render();
+
+    if (line_style_.line_stipple) {
+      glDisable(GL_LINE_STIPPLE);
+    }
+
+    if (post_render) {
+      post_render(this);
+    }
+  }
+
   void set_line_style(const LineStyle& line_style) { line_style_ = line_style; }
   const LineStyle& line_style() const { return line_style_; }
 
@@ -152,6 +184,18 @@ class DashedStripeObject : public RenderObject {
     glUseProgram(0);
   }
 
+  void RenderCustom(const ShaderManager& shader_manager,
+                    PreRenderCallback pre_render = nullptr,
+                    PostRenderCallback post_render = nullptr) override {
+    if (pre_render && !pre_render(this)) {
+      return;
+    }
+    mesh_renderer_.Render();
+    if (post_render) {
+      post_render(this);
+    }
+  }
+
   void set_color(const glm::vec4& color) { color_ = color; }
   const glm::vec4& color() const { return color_; }
 
@@ -193,6 +237,18 @@ class SimpleTexturedObject : public RenderObject {
     glUseProgram(0);
   }
 
+  void RenderCustom(const ShaderManager& shader_manager,
+                    PreRenderCallback pre_render = nullptr,
+                    PostRenderCallback post_render = nullptr) override {
+    if (pre_render && !pre_render(this)) {
+      return;
+    }
+    mesh_renderer_.Render();
+    if (post_render) {
+      post_render(this);
+    }
+  }
+
   void set_alpha(float alpha) { alpha_ = alpha; }
   float alpha() const { return alpha_; }
 
@@ -225,6 +281,20 @@ class RoadElementObject : public RenderObject {
   void Render(const ShaderManager& shader_manager) override {
     for (auto& sub_mesh : sub_meshes_) {
       sub_mesh->Render(shader_manager);
+    }
+  }
+
+  void RenderCustom(const ShaderManager& shader_manager,
+                    PreRenderCallback pre_render = nullptr,
+                    PostRenderCallback post_render = nullptr) override {
+    if (pre_render && !pre_render(this)) {
+      return;
+    }
+    for (auto& sub_mesh : sub_meshes_) {
+      sub_mesh->RenderCustom(shader_manager, pre_render, post_render);
+    }
+    if (post_render) {
+      post_render(this);
     }
   }
 

@@ -19,6 +19,8 @@
 
 namespace {
 
+using SceneData = common::SceneData;
+using ObjectData = common::ObjectData;
 using milli = std::chrono::milliseconds;
 namespace fs = std::experimental::filesystem;
 using namespace nvgl;
@@ -178,46 +180,60 @@ void PDWindow::onInitialize() {
   glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 0, scene_ubo_);
+  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
 
   glGenBuffers(1, &object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(ObjectData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 1, object_ubo_);
-
+  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_);
 
   program_manager_.m_filetype = nvh::ShaderFileManager::FILETYPE_GLSL;
-  program_manager_.addDirectory("./");
+  program_manager_.addDirectory("./assets/shaders/");
+  program_manager_.addDirectory("./app/");
 
-  // program_manager_.registerInclude("common.h");
+  program_manager_.registerInclude("common.h");
 
   ProgramID unlit_vertex_colored_id = program_manager_.createProgram(
-      ProgramManager::Definition(
-          GL_VERTEX_SHADER, "assets/shaders/unlit_vertex_colored.vert.glsl"),
-      ProgramManager::Definition(
-          GL_FRAGMENT_SHADER, "assets/shaders/unlit_vertex_colored.frag.glsl"));
+      ProgramManager::Definition(GL_VERTEX_SHADER,
+                                 "unlit_vertex_colored.vert.glsl"),
+      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+                                 "unlit_vertex_colored.frag.glsl"));
 
   ProgramID unlit_colored_id = program_manager_.createProgram(
-      ProgramManager::Definition(
-          GL_VERTEX_SHADER, "assets/shaders/unlit_colored_default.vert.glsl"),
-      ProgramManager::Definition(
-          GL_FRAGMENT_SHADER,
-          "assets/shaders/unlit_colored_default.frag.glsl"));
+      ProgramManager::Definition(GL_VERTEX_SHADER,
+                                 "unlit_colored_default.vert.glsl"),
+      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+                                 "unlit_colored_default.frag.glsl"));
+
+  ProgramID unlit_colored_uniform_id = program_manager_.createProgram(
+      ProgramManager::Definition(GL_VERTEX_SHADER,
+                                 "unlit_colored_uniform_buffer.vert.glsl"),
+      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+                                 "unlit_colored_uniform_buffer.frag.glsl"));
 
   ProgramID simple_texture_object_id = program_manager_.createProgram(
-      ProgramManager::Definition(
-          GL_VERTEX_SHADER, "assets/shaders/simple_textured_object.vert.glsl"),
-      ProgramManager::Definition(
-          GL_FRAGMENT_SHADER,
-          "assets/shaders/simple_textured_object.frag.glsl"));
+      ProgramManager::Definition(GL_VERTEX_SHADER,
+                                 "simple_textured_object.vert.glsl"),
+      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+                                 "simple_textured_object.frag.glsl"));
+
+  ProgramID simple_texture_object_uniform_id = program_manager_.createProgram(
+      ProgramManager::Definition(GL_VERTEX_SHADER,
+                                 "simple_textured_object_uniform_buffer.vert.glsl"),
+      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+                                 "simple_textured_object_uniform_buffer.frag.glsl"));
 
   shader_manager_.RegisterShaderForName(
       "unlit_vertex_colored", program_manager_.get(unlit_vertex_colored_id));
   shader_manager_.RegisterShaderForName("unlit_colored",
                                         program_manager_.get(unlit_colored_id));
   shader_manager_.RegisterShaderForName(
+      "unlit_colored_uniform", program_manager_.get(unlit_colored_uniform_id));
+  shader_manager_.RegisterShaderForName(
       "simple_texture_object", program_manager_.get(simple_texture_object_id));
+  shader_manager_.RegisterShaderForName(
+      "simple_texture_object_uniform", program_manager_.get(simple_texture_object_uniform_id));
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
@@ -277,6 +293,7 @@ void PDWindow::onUpdate() {
 }
 
 void PDWindow::onRender() {
+  ProfileTimer timer("OnRender");
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   switch (draw_method_) {
@@ -319,20 +336,53 @@ void PDWindow::onResize(int w, int h) {
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
 void PDWindow::DrawSceneBasic() {
-  //object_data_.M = glm::rotate(glm::mat4(1.0), Time::time(), glm::vec3(0, 1, 0));
-  object_data_.M = glm::mat4(1.0);
-
-  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data_);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
   for (auto& object : render_objects_) {
     object->Render(shader_manager_);
   }
 }
 
 void PDWindow::DrawSceneBasicUniformBuffer() {
+  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data_);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
+  GLuint last_bind_program = 0;
+  auto pre_render_func = [object_ubo = object_ubo_,
+                          &shader_manager = shader_manager_, &last_bind_program](
+                             const RenderObject* render_object) -> bool {
+    GLuint program =
+        shader_manager.GetShader(render_object->shader() + "_uniform");
+    if (last_bind_program != program) {
+      glUseProgram(program);
+      last_bind_program = program;
+    }
+
+    ObjectData object_data;
+    object_data.M = render_object->world();
+    auto line_object = dynamic_cast<const LineObject*>(render_object);
+    if (line_object) {
+      object_data.color = line_object->color();
+    }
+    auto dashed_stripe_object =
+        dynamic_cast<const DashedStripeObject*>(render_object);
+    if (dashed_stripe_object) {
+      object_data.color = dashed_stripe_object->color();
+    }
+    auto simple_textured_object =
+        dynamic_cast<const SimpleTexturedObject*>(render_object);
+    if (simple_textured_object) {
+      object_data.color = glm::vec4(simple_textured_object->alpha());
+    }
+
+    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    return true;
+  };
+
+  for (auto& object : render_objects_) {
+    object->RenderCustom(shader_manager_, pre_render_func);
+  }
 }
 
 void PDWindow::DrawSceneCommandList() {

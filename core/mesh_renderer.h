@@ -45,7 +45,7 @@ class MeshRenderer {
     int current_offset = 0;
     std::vector<VertexAttribData> vertex_attribs;
     vertex_attribs.push_back(
-        VertexAttribData{.attrib_location = Mesh::POSITION,
+        VertexAttribData{.attrib_location = POSITION,
                          .attrib_type = GL_FLOAT,
                          .component_size = 3,
                          .normalized = GL_FALSE,
@@ -56,7 +56,7 @@ class MeshRenderer {
     if (mesh_.colors().size()) {
       current_offset += vertex_attribs.back().element_size;
       vertex_attribs.push_back(
-          VertexAttribData{.attrib_location = Mesh::COLOR,
+          VertexAttribData{.attrib_location = COLOR,
                            .attrib_type = GL_UNSIGNED_BYTE,
                            .component_size = 4,
                            .normalized = GL_TRUE,
@@ -68,7 +68,7 @@ class MeshRenderer {
     if (mesh_.uvs().size()) {
       current_offset += vertex_attribs.back().element_size;
       vertex_attribs.push_back(
-          VertexAttribData{.attrib_location = Mesh::UV,
+          VertexAttribData{.attrib_location = UV,
                            .attrib_type = GL_FLOAT,
                            .component_size = 2,
                            .normalized = GL_FALSE,

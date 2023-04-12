@@ -10,6 +10,7 @@
 
 #include "nvgl/programmanager_gl.hpp"
 
+#include "app/common.h"
 #include "app/RenderObject.h"
 #include "core/Texture2D.h"
 #include "core/Window.h"
@@ -33,14 +34,10 @@ class PDWindow : public Window {
   void DrawSceneBasicUniformBuffer();
   void DrawSceneCommandList();
 
-  struct SceneData {
-    glm::mat4 VP;
-  } scene_data_;
+  common::SceneData scene_data_;
   GLuint scene_ubo_;
 
-  struct ObjectData {
-    glm::mat4 M;
-  } object_data_;
+  common::ObjectData object_data_;
   GLuint object_ubo_;
 
   enum DrawMethod {
