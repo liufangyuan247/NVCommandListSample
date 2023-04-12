@@ -20,6 +20,10 @@ class ShaderManager {
     }
   }
 
+  void RegisterShaderForName(const std::string& shader_name, GLuint program) {
+    loaded_programs_[shader_name] = program;
+  }
+
   void LoadShaderForName(const std::string& shader_name,
                          const std::string& vert_src_path,
                          const std::string& frag_src_path,

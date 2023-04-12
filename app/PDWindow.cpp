@@ -21,6 +21,8 @@ namespace {
 
 using milli = std::chrono::milliseconds;
 namespace fs = std::experimental::filesystem;
+using namespace nvgl;
+
 std::set<std::string> extensions;
 
 // constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
@@ -184,18 +186,38 @@ void PDWindow::onInitialize() {
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
   glBindBufferBase(GL_UNIFORM_BUFFER, 1, object_ubo_);
 
-  shader_manager_.LoadShaderForName(
-      "unlit_vertex_colored", "assets/shaders/unlit_vertex_colored.vert.glsl",
-      "assets/shaders/unlit_vertex_colored.frag.glsl");
-  shader_manager_.LoadShaderForName(
-      "unlit_colored", "assets/shaders/unlit_colored_default.vert.glsl",
-      "assets/shaders/unlit_colored_default.frag.glsl");
-  shader_manager_.LoadShaderForName("unlit_vertex_colored_command_list",
-                                    "assets/shaders/colored_cl.vert.glsl",
-                                    "assets/shaders/colored_cl.frag.glsl");
-  shader_manager_.LoadShaderForName(
-      "simple_texture_object", "assets/shaders/simple_textured_object.vert.glsl",
-      "assets/shaders/simple_textured_object.frag.glsl");
+
+  program_manager_.m_filetype = nvh::ShaderFileManager::FILETYPE_GLSL;
+  program_manager_.addDirectory("./");
+
+  // program_manager_.registerInclude("common.h");
+
+  ProgramID unlit_vertex_colored_id = program_manager_.createProgram(
+      ProgramManager::Definition(
+          GL_VERTEX_SHADER, "assets/shaders/unlit_vertex_colored.vert.glsl"),
+      ProgramManager::Definition(
+          GL_FRAGMENT_SHADER, "assets/shaders/unlit_vertex_colored.frag.glsl"));
+
+  ProgramID unlit_colored_id = program_manager_.createProgram(
+      ProgramManager::Definition(
+          GL_VERTEX_SHADER, "assets/shaders/unlit_colored_default.vert.glsl"),
+      ProgramManager::Definition(
+          GL_FRAGMENT_SHADER,
+          "assets/shaders/unlit_colored_default.frag.glsl"));
+
+  ProgramID simple_texture_object_id = program_manager_.createProgram(
+      ProgramManager::Definition(
+          GL_VERTEX_SHADER, "assets/shaders/simple_textured_object.vert.glsl"),
+      ProgramManager::Definition(
+          GL_FRAGMENT_SHADER,
+          "assets/shaders/simple_textured_object.frag.glsl"));
+
+  shader_manager_.RegisterShaderForName(
+      "unlit_vertex_colored", program_manager_.get(unlit_vertex_colored_id));
+  shader_manager_.RegisterShaderForName("unlit_colored",
+                                        program_manager_.get(unlit_colored_id));
+  shader_manager_.RegisterShaderForName(
+      "simple_texture_object", program_manager_.get(simple_texture_object_id));
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
@@ -237,7 +259,7 @@ void PDWindow::onUpdate() {
   }
 
   // Compute VP matrix
-  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.01f, 5000.0f);
+  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.01f, 30000.0f);
   glm::mat4 view = camera_.view();
 
   scene_data_.VP = projection * view;
@@ -261,6 +283,9 @@ void PDWindow::onRender() {
     case kBasic:
       DrawSceneBasic();
       break;
+    case kBasicUniformBuffer:
+      DrawSceneBasicUniformBuffer();
+      break;
     case kCommandList:
       DrawSceneCommandList();
       break;
@@ -273,12 +298,13 @@ void PDWindow::onUIUpdate() {
 
   const char* combos[] = {
     "Normal",
+    "kBasicUniformBuffer",
     "Command List",
   };
 
   ImGui::Begin(u8"设置");
   int current_method = draw_method_;
-  if (ImGui::Combo(u8"Draw Method", &current_method, combos, 2)) {
+  if (ImGui::Combo(u8"Draw Method", &current_method, combos, kMethodCount)) {
     draw_method_ = static_cast<DrawMethod>(current_method);
   }
 
@@ -303,6 +329,10 @@ void PDWindow::DrawSceneBasic() {
   for (auto& object : render_objects_) {
     object->Render(shader_manager_);
   }
+}
+
+void PDWindow::DrawSceneBasicUniformBuffer() {
+
 }
 
 void PDWindow::DrawSceneCommandList() {

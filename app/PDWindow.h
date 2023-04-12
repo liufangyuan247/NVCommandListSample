@@ -8,6 +8,8 @@
 
 #include <glm/glm.hpp>
 
+#include "nvgl/programmanager_gl.hpp"
+
 #include "app/RenderObject.h"
 #include "core/Texture2D.h"
 #include "core/Window.h"
@@ -28,6 +30,7 @@ class PDWindow : public Window {
 
  private:
   void DrawSceneBasic();
+  void DrawSceneBasicUniformBuffer();
   void DrawSceneCommandList();
 
   struct SceneData {
@@ -42,13 +45,17 @@ class PDWindow : public Window {
 
   enum DrawMethod {
     kBasic = 0,
+    kBasicUniformBuffer,
     kCommandList,
+    kMethodCount,
   } draw_method_ = kBasic;
 
   bool command_list_supported_ = false;
 
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
 
+
   Camera camera_;
   ShaderManager shader_manager_;
+  nvgl::ProgramManager program_manager_;
 };
