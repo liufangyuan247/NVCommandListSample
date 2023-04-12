@@ -1,15 +1,15 @@
 #include "PDWindow.h"
 
 #include <atomic>
-#include <cstdio>
 #include <chrono>
+#include <cstdio>
 #include <experimental/filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
-#include <vector>
 #include <thread>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -137,7 +137,8 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
        fs::directory_iterator(fs::path(map_directory))) {
     nlohmann::json json = LoadJsonFromFile(directory_entry.path());
     if (json == nlohmann::json()) {
-      printf("parsing json error: %s\n", directory_entry.path().string().c_str());
+      printf("parsing json error: %s\n",
+             directory_entry.path().string().c_str());
       continue;
     } else {
       // printf("parsing file: %s\n", directory_entry.path().string().c_str());
@@ -176,8 +177,10 @@ void PDWindow::onInitialize() {
   printf("max_uniform_buffer_size: %d\n", max_uniform_buffer_size);
 
   int uniform_buffer_offset_alignment = 0;
-  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uniform_buffer_offset_alignment);
-  printf("uniform_buffer_offset_alignment: %d\n", uniform_buffer_offset_alignment);
+  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
+                &uniform_buffer_offset_alignment);
+  printf("uniform_buffer_offset_alignment: %d\n",
+         uniform_buffer_offset_alignment);
 
   command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
 
@@ -192,7 +195,8 @@ void PDWindow::onInitialize() {
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
   // int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
-  // glBufferData(GL_UNIFORM_BUFFER, data_stride * render_objects_.size(), nullptr,
+  // glBufferData(GL_UNIFORM_BUFFER, data_stride * render_objects_.size(),
+  // nullptr,
   //              GL_DYNAMIC_DRAW);
   // glBindBuffer(GL_UNIFORM_BUFFER, 0);
   // glBindBufferBase(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_);
@@ -228,10 +232,11 @@ void PDWindow::onInitialize() {
                                  "simple_textured_object.frag.glsl"));
 
   ProgramID simple_texture_object_uniform_id = program_manager_.createProgram(
-      ProgramManager::Definition(GL_VERTEX_SHADER,
-                                 "simple_textured_object_uniform_buffer.vert.glsl"),
-      ProgramManager::Definition(GL_FRAGMENT_SHADER,
-                                 "simple_textured_object_uniform_buffer.frag.glsl"));
+      ProgramManager::Definition(
+          GL_VERTEX_SHADER, "simple_textured_object_uniform_buffer.vert.glsl"),
+      ProgramManager::Definition(
+          GL_FRAGMENT_SHADER,
+          "simple_textured_object_uniform_buffer.frag.glsl"));
 
   shader_manager_.RegisterShaderForName(
       "unlit_vertex_colored", program_manager_.get(unlit_vertex_colored_id));
@@ -242,7 +247,8 @@ void PDWindow::onInitialize() {
   shader_manager_.RegisterShaderForName(
       "simple_texture_colored", program_manager_.get(simple_texture_object_id));
   shader_manager_.RegisterShaderForName(
-      "simple_texture_colored_uniform", program_manager_.get(simple_texture_object_uniform_id));
+      "simple_texture_colored_uniform",
+      program_manager_.get(simple_texture_object_uniform_id));
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
@@ -250,6 +256,8 @@ void PDWindow::onInitialize() {
 
 void PDWindow::onUpdate() {
   Window::onUpdate();
+  gl_context_.glUseProgram(-1);
+  gl_context_.glUseProgram(0);
 
   // Process camera update
   {
@@ -284,7 +292,8 @@ void PDWindow::onUpdate() {
   }
 
   // Compute VP matrix
-  glm::mat4 projection = glm::perspective(glm::radians(60.0f), width / (float) height, 0.01f, 30000.0f);
+  glm::mat4 projection = glm::perspective(
+      glm::radians(60.0f), width / (float)height, 0.01f, 30000.0f);
   glm::mat4 view = camera_.view();
 
   scene_data_.VP = projection * view;
@@ -294,10 +303,10 @@ void PDWindow::onUpdate() {
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
   for (auto& k_v : shader_manager_.loaded_programs()) {
-    glUseProgram(k_v.second);
+    gl_context_.glUseProgram(k_v.second);
     int VP_loc = glGetUniformLocation(k_v.second, "VP");
     glUniformMatrix4fv(VP_loc, 1, GL_FALSE, glm::value_ptr(scene_data_.VP));
-    glUseProgram(0);
+    gl_context_.glUseProgram(0);
   }
 }
 
@@ -323,9 +332,9 @@ void PDWindow::onUIUpdate() {
   ImGui::ShowDemoWindow();
 
   const char* combos[] = {
-    "Normal",
-    "kBasicUniformBuffer",
-    "Command List",
+      "Normal",
+      "kBasicUniformBuffer",
+      "Command List",
   };
 
   ImGui::Begin(u8"设置");
@@ -334,7 +343,9 @@ void PDWindow::onUIUpdate() {
     draw_method_ = static_cast<DrawMethod>(current_method);
   }
 
-  ImGui::Checkbox(u8"State Cache", &cache_state_);
+  bool cache_state = gl_context_.cache_state();
+  ImGui::Checkbox(u8"State Cache", &cache_state);
+  gl_context_.set_cache_state(cache_state);
 
   ImGui::End();
 }
@@ -347,22 +358,52 @@ void PDWindow::onResize(int w, int h) {
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
 void PDWindow::DrawSceneBasic() {
+  // ProfileTimer timer("collect uniform data");
+  auto pre_render_func =
+      [&shader_manager_ = shader_manager_,
+       &gl_context = gl_context_](RenderObject* render_object) -> bool {
+    GLuint program = shader_manager_.GetShader(render_object->shader());
+    gl_context.glUseProgram(program);
+
+    int M_loc = glGetUniformLocation(program, "M");
+    int color_loc = glGetUniformLocation(program, "color");
+    int alpha_loc = glGetUniformLocation(program, "in_alpha");
+    glUniformMatrix4fv(M_loc, 1, GL_FALSE,
+                       glm::value_ptr(render_object->world()));
+
+    auto line_object = dynamic_cast<LineObject*>(render_object);
+    if (line_object) {
+      glUniform4fv(color_loc, 1, glm::value_ptr(line_object->color()));
+    }
+    auto dashed_stripe_object =
+        dynamic_cast<DashedStripeObject*>(render_object);
+    if (dashed_stripe_object) {
+      glUniform4fv(color_loc, 1, glm::value_ptr(dashed_stripe_object->color()));
+    }
+    auto simple_textured_object =
+        dynamic_cast<SimpleTexturedObject*>(render_object);
+    if (simple_textured_object) {
+      glUniform1f(alpha_loc, simple_textured_object->alpha());
+    }
+    return true;
+  };
+
   for (auto& object : render_objects_) {
-    object->Render(shader_manager_);
+    object->Render(shader_manager_, pre_render_func);
   }
 }
 
 void PDWindow::DrawSceneBasicUniformBuffer() {
   // Collect uniform data in buffer
   std::map<const void*, int> object_slot;
-  std::vector<const RenderObject*> real_render_objects;
+  std::vector<RenderObject*> real_render_objects;
   std::vector<ObjectData> object_datas;
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
   {
     // ProfileTimer timer("collect uniform data");
     auto collect_data_pre_render_func =
         [&object_slot, &object_datas,
-         &real_render_objects](const RenderObject* render_object) -> bool {
+         &real_render_objects](RenderObject* render_object) -> bool {
       bool should_continue = true;
       ObjectData object_data;
       object_data.M = render_object->world();
@@ -391,7 +432,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
     };
 
     for (auto& object : render_objects_) {
-      object->RenderCustom(shader_manager_, collect_data_pre_render_func);
+      object->Render(shader_manager_, collect_data_pre_render_func);
     }
   }
 
@@ -418,20 +459,15 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
     for (int i = 0; i < real_render_objects.size(); ++i) {
       const RenderObject* object = real_render_objects[i];
       GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
-      if (last_bind_program != program) {
-        glUseProgram(program);
-        last_bind_program = program;
-      }
+      gl_context_.glUseProgram(program);
       glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
                         i * data_stride, sizeof(ObjectData));
-      const_cast<RenderObject*>(object)->RenderCustom(shader_manager_);
+      const_cast<RenderObject*>(object)->Render(shader_manager_);
     }
   }
 }
 
-void PDWindow::DrawSceneCommandList() {
-
-}
+void PDWindow::DrawSceneCommandList() {}
 
 #undef min
 #undef max

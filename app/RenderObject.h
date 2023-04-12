@@ -21,15 +21,14 @@ inline MatType MatFromJson(const nlohmann::json& json) {
 
 class RenderObject {
  public:
-  using PreRenderCallback = std::function<bool(const RenderObject*)>;
-  using PostRenderCallback = std::function<void(const RenderObject*)>;
+  using PreRenderCallback = std::function<bool(RenderObject*)>;
+  using PostRenderCallback = std::function<void(RenderObject*)>;
 
   virtual ~RenderObject() = default;
 
   virtual void SerializeFromJson(const nlohmann::json& json) {}
   virtual void Initialize() {}
-  virtual void Render(const ShaderManager& shader_manager) {}
-  virtual void RenderCustom(const ShaderManager& shader_manager,
+  virtual void Render(const ShaderManager& shader_manager,
                             PreRenderCallback pre_render = nullptr,
                             PostRenderCallback post_render = nullptr) {}
 
@@ -89,32 +88,7 @@ class LineObject : public RenderObject {
 
   void Initialize() override { mesh_renderer_.Initialize(); }
 
-  void Render(const ShaderManager& shader_manager) override {
-    glLineWidth(line_style_.line_width);
-    if (line_style_.line_stipple) {
-      glEnable(GL_LINE_STIPPLE);
-      glLineStipple(line_style_.line_stipple_factor,
-                    line_style_.line_stipple_pattern);
-    }
-
-    GLuint program = shader_manager.GetShader(shader());
-    glUseProgram(program);
-
-    int M_loc = glGetUniformLocation(program, "M");
-    glUniformMatrix4fv(M_loc, 1, GL_FALSE, glm::value_ptr(world()));
-
-    int color_loc = glGetUniformLocation(program, "color");
-    glUniform4fv(color_loc, 1, glm::value_ptr(color_));
-
-    mesh_renderer_.Render();
-    glUseProgram(0);
-
-    if (line_style_.line_stipple) {
-      glDisable(GL_LINE_STIPPLE);
-    }
-  }
-
-  void RenderCustom(const ShaderManager& shader_manager,
+  void Render(const ShaderManager& shader_manager,
                     PreRenderCallback pre_render = nullptr,
                     PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
@@ -170,21 +144,7 @@ class DashedStripeObject : public RenderObject {
 
   void Initialize() override { mesh_renderer_.Initialize(); }
 
-  void Render(const ShaderManager& shader_manager) override {
-    GLuint program = shader_manager.GetShader(shader());
-    glUseProgram(program);
-
-    int M_loc = glGetUniformLocation(program, "M");
-    glUniformMatrix4fv(M_loc, 1, GL_FALSE, glm::value_ptr(world()));
-
-    int color_loc = glGetUniformLocation(program, "color");
-    glUniform4fv(color_loc, 1, glm::value_ptr(color_));
-
-    mesh_renderer_.Render();
-    glUseProgram(0);
-  }
-
-  void RenderCustom(const ShaderManager& shader_manager,
+  void Render(const ShaderManager& shader_manager,
                     PreRenderCallback pre_render = nullptr,
                     PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
@@ -224,20 +184,7 @@ class SimpleTexturedObject : public RenderObject {
 
   void Initialize() override { mesh_renderer_.Initialize(); }
 
-  void Render(const ShaderManager& shader_manager) override {
-    GLuint program = shader_manager.GetShader(shader());
-    glUseProgram(program);
-
-    int M_loc = glGetUniformLocation(program, "M");
-    glUniformMatrix4fv(M_loc, 1, GL_FALSE, glm::value_ptr(world()));
-    int in_alpha_loc = glGetUniformLocation(program, "in_alpha");
-    glUniform1f(in_alpha_loc, alpha_);
-
-    mesh_renderer_.Render();
-    glUseProgram(0);
-  }
-
-  void RenderCustom(const ShaderManager& shader_manager,
+  void Render(const ShaderManager& shader_manager,
                     PreRenderCallback pre_render = nullptr,
                     PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
@@ -278,20 +225,14 @@ class RoadElementObject : public RenderObject {
     }
   }
 
-  void Render(const ShaderManager& shader_manager) override {
-    for (auto& sub_mesh : sub_meshes_) {
-      sub_mesh->Render(shader_manager);
-    }
-  }
-
-  void RenderCustom(const ShaderManager& shader_manager,
+  void Render(const ShaderManager& shader_manager,
                     PreRenderCallback pre_render = nullptr,
                     PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
       return;
     }
     for (auto& sub_mesh : sub_meshes_) {
-      sub_mesh->RenderCustom(shader_manager, pre_render, post_render);
+      sub_mesh->Render(shader_manager, pre_render, post_render);
     }
     if (post_render) {
       post_render(this);

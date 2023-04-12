@@ -17,10 +17,7 @@
 #include "core/camera.h"
 #include "core/mesh_renderer.h"
 #include "core/shader_manager.h"
-
-struct OpenGLState {
-  GLuint current_bind_program = 0;
-};
+#include "core/opengl_context.h"
 
 class PDWindow : public Window {
  public:
@@ -53,11 +50,8 @@ class PDWindow : public Window {
 
   bool command_list_supported_ = false;
 
-  OpenGLState opengl_state_;
-  bool cache_state_ = true;
-
+  OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
-
 
   Camera camera_;
   ShaderManager shader_manager_;

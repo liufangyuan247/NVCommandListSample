@@ -15,7 +15,7 @@ const std::map<std::string, factory_func> kRegisteredFacotryFuncMap{
     {"SimpleTexturedObject",
      []() -> std::unique_ptr<RenderObject> {
        return std::make_unique<SimpleTexturedObject>();
-     }},     
+     }},
     {"LaneRenderObject",
      []() -> std::unique_ptr<RenderObject> {
        return std::make_unique<RoadElementObject>();
@@ -40,7 +40,8 @@ std::unique_ptr<RenderObject> CreateRenderObjectFromJson(
     printf("Not registered type name: %s\n", type_name.c_str());
     return nullptr;
   }
-  std::unique_ptr<RenderObject> object = kRegisteredFacotryFuncMap.at(type_name)();
+  std::unique_ptr<RenderObject> object =
+      kRegisteredFacotryFuncMap.at(type_name)();
   object->SerializeFromJson(json);
   return object;
 }
