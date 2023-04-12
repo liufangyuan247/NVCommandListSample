@@ -26,6 +26,12 @@ namespace fs = std::experimental::filesystem;
 using namespace nvgl;
 
 std::set<std::string> extensions;
+constexpr int kUniformBufferOffsetAlignment = 256;
+
+int UniformBufferAlignedOffset(int size) {
+  return (size + kUniformBufferOffsetAlignment - 1) /
+         kUniformBufferOffsetAlignment * kUniformBufferOffsetAlignment;
+}
 
 // constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
 constexpr const char kMapDataFolder[] = "assets/dumped_map_data_compact";
@@ -184,9 +190,12 @@ void PDWindow::onInitialize() {
 
   glGenBuffers(1, &object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(ObjectData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_);
+  // int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
+  // glBufferData(GL_UNIFORM_BUFFER, data_stride * render_objects_.size(), nullptr,
+  //              GL_DYNAMIC_DRAW);
+  // glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  // glBindBufferBase(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_);
 
   program_manager_.m_filetype = nvh::ShaderFileManager::FILETYPE_GLSL;
   program_manager_.addDirectory("./assets/shaders/");
@@ -231,9 +240,9 @@ void PDWindow::onInitialize() {
   shader_manager_.RegisterShaderForName(
       "unlit_colored_uniform", program_manager_.get(unlit_colored_uniform_id));
   shader_manager_.RegisterShaderForName(
-      "simple_texture_object", program_manager_.get(simple_texture_object_id));
+      "simple_texture_colored", program_manager_.get(simple_texture_object_id));
   shader_manager_.RegisterShaderForName(
-      "simple_texture_object_uniform", program_manager_.get(simple_texture_object_uniform_id));
+      "simple_texture_colored_uniform", program_manager_.get(simple_texture_object_uniform_id));
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
@@ -325,6 +334,8 @@ void PDWindow::onUIUpdate() {
     draw_method_ = static_cast<DrawMethod>(current_method);
   }
 
+  ImGui::Checkbox(u8"State Cache", &cache_state_);
+
   ImGui::End();
 }
 
@@ -342,46 +353,79 @@ void PDWindow::DrawSceneBasic() {
 }
 
 void PDWindow::DrawSceneBasicUniformBuffer() {
-  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data_);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  // Collect uniform data in buffer
+  std::map<const void*, int> object_slot;
+  std::vector<const RenderObject*> real_render_objects;
+  std::vector<ObjectData> object_datas;
+  int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
+  {
+    // ProfileTimer timer("collect uniform data");
+    auto collect_data_pre_render_func =
+        [&object_slot, &object_datas,
+         &real_render_objects](const RenderObject* render_object) -> bool {
+      bool should_continue = true;
+      ObjectData object_data;
+      object_data.M = render_object->world();
+      auto line_object = dynamic_cast<const LineObject*>(render_object);
+      if (line_object) {
+        object_data.color = line_object->color();
+        should_continue = false;
+      }
+      auto dashed_stripe_object =
+          dynamic_cast<const DashedStripeObject*>(render_object);
+      if (dashed_stripe_object) {
+        object_data.color = dashed_stripe_object->color();
+        should_continue = false;
+      }
+      auto simple_textured_object =
+          dynamic_cast<const SimpleTexturedObject*>(render_object);
+      if (simple_textured_object) {
+        object_data.color = glm::vec4(simple_textured_object->alpha());
+        should_continue = false;
+      }
+      if (!should_continue) {
+        object_datas.push_back(object_data);
+        real_render_objects.push_back(render_object);
+      }
+      return should_continue;
+    };
 
-  GLuint last_bind_program = 0;
-  auto pre_render_func = [object_ubo = object_ubo_,
-                          &shader_manager = shader_manager_, &last_bind_program](
-                             const RenderObject* render_object) -> bool {
-    GLuint program =
-        shader_manager.GetShader(render_object->shader() + "_uniform");
-    if (last_bind_program != program) {
-      glUseProgram(program);
-      last_bind_program = program;
+    for (auto& object : render_objects_) {
+      object->RenderCustom(shader_manager_, collect_data_pre_render_func);
+    }
+  }
+
+  {
+    // ProfileTimer timer("upload uniform data");
+    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+    if (object_ubo_size_ < object_datas.size() * data_stride) {
+      glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
+                   GL_DYNAMIC_DRAW);
+      object_ubo_size_ = object_datas.size() * data_stride;
+    }
+    void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    for (int i = 0; i < object_datas.size(); ++i) {
+      memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
     }
 
-    ObjectData object_data;
-    object_data.M = render_object->world();
-    auto line_object = dynamic_cast<const LineObject*>(render_object);
-    if (line_object) {
-      object_data.color = line_object->color();
-    }
-    auto dashed_stripe_object =
-        dynamic_cast<const DashedStripeObject*>(render_object);
-    if (dashed_stripe_object) {
-      object_data.color = dashed_stripe_object->color();
-    }
-    auto simple_textured_object =
-        dynamic_cast<const SimpleTexturedObject*>(render_object);
-    if (simple_textured_object) {
-      object_data.color = glm::vec4(simple_textured_object->alpha());
-    }
-
-    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ObjectData), &object_data);
+    glUnmapBuffer(GL_UNIFORM_BUFFER);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
-    return true;
-  };
+  }
 
-  for (auto& object : render_objects_) {
-    object->RenderCustom(shader_manager_, pre_render_func);
+  {
+    // ProfileTimer timer("render data");
+
+    for (int i = 0; i < real_render_objects.size(); ++i) {
+      const RenderObject* object = real_render_objects[i];
+      GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
+      if (last_bind_program != program) {
+        glUseProgram(program);
+        last_bind_program = program;
+      }
+      glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
+                        i * data_stride, sizeof(ObjectData));
+      const_cast<RenderObject*>(object)->RenderCustom(shader_manager_);
+    }
   }
 }
 

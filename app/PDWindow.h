@@ -18,6 +18,10 @@
 #include "core/mesh_renderer.h"
 #include "core/shader_manager.h"
 
+struct OpenGLState {
+  GLuint current_bind_program = 0;
+};
+
 class PDWindow : public Window {
  public:
   PDWindow();
@@ -37,17 +41,20 @@ class PDWindow : public Window {
   common::SceneData scene_data_;
   GLuint scene_ubo_;
 
-  common::ObjectData object_data_;
   GLuint object_ubo_;
+  int object_ubo_size_= 0;
 
   enum DrawMethod {
     kBasic = 0,
     kBasicUniformBuffer,
     kCommandList,
     kMethodCount,
-  } draw_method_ = kBasic;
+  } draw_method_ = kBasicUniformBuffer;
 
   bool command_list_supported_ = false;
+
+  OpenGLState opengl_state_;
+  bool cache_state_ = true;
 
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
 
