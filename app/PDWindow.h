@@ -33,7 +33,15 @@ class PDWindow : public Window {
  private:
   void DrawSceneBasic();
   void DrawSceneBasicUniformBuffer();
+  void DrawSceneCommandToken();
   void DrawSceneCommandList();
+  
+  void InitializeCommandListResouce();
+  void FinalizeCommandListResouce();
+  void ResizeCommandListRenderbuffers(int w, int h);
+
+  void BindFallbackFramebuffer();
+  void BlitFallbackFramebuffer();
 
   common::SceneData scene_data_;
   GLuint scene_ubo_;
@@ -44,9 +52,31 @@ class PDWindow : public Window {
   enum DrawMethod {
     kBasic = 0,
     kBasicUniformBuffer,
+    kCommandToken,
     kCommandList,
     kMethodCount,
   } draw_method_ = kBasicUniformBuffer;
+
+  struct NVTokenSequence {
+    std::vector<GLintptr> offsets;
+    std::vector<GLsizei> sizes;
+    std::vector<GLuint> states;
+    std::vector<GLuint> fbos;
+  };
+
+  struct CommandListExtensionData {
+    // resizes
+    GLuint fallback_framebuffer = 0;
+    GLuint color_texture = 0;
+    GLuint depth_stencil_texture = 0;
+    GLuint original_framebuffer = 0;
+
+    std::vector<GLuint> all_states;
+
+    GLuint command_stream_buffer = 0;
+    NVTokenSequence token_sequence;
+    NVTokenSequence token_sequence_address;
+  } command_list_data_;
 
   bool command_list_supported_ = false;
 

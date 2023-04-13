@@ -27,6 +27,7 @@ using namespace nvgl;
 
 std::set<std::string> extensions;
 constexpr int kUniformBufferOffsetAlignment = 256;
+int kMultiSampleCount = 8;
 
 int UniformBufferAlignedOffset(int size) {
   return (size + kUniformBufferOffsetAlignment - 1) /
@@ -155,7 +156,11 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
 
 }  // namespace
 
-PDWindow::~PDWindow() {}
+PDWindow::~PDWindow() {
+  if (command_list_supported_) {
+    FinalizeCommandListResouce();
+  }
+}
 
 PDWindow::PDWindow() : Window(u8"NVCommandListDemo") {}
 
@@ -171,7 +176,7 @@ void PDWindow::onInitialize() {
 
   ImGui::StyleColorsDark();
   GetGLExtension();
-
+  
   int max_uniform_buffer_size = 0;
   glGetIntegerv(GL_UNIFORM_BUFFER_SIZE, &max_uniform_buffer_size);
   printf("max_uniform_buffer_size: %d\n", max_uniform_buffer_size);
@@ -183,6 +188,9 @@ void PDWindow::onInitialize() {
          uniform_buffer_offset_alignment);
 
   command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
+  if (command_list_supported_) {
+    InitializeCommandListResouce();
+  }
 
   // UBO
   glGenBuffers(1, &scene_ubo_);
@@ -312,7 +320,11 @@ void PDWindow::onUpdate() {
 
 void PDWindow::onRender() {
   ProfileTimer timer("OnRender");
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (command_list_supported_) {
+    BindFallbackFramebuffer();
+  }
+
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   switch (draw_method_) {
     case kBasic:
@@ -321,9 +333,15 @@ void PDWindow::onRender() {
     case kBasicUniformBuffer:
       DrawSceneBasicUniformBuffer();
       break;
+    case kCommandToken:
+      DrawSceneCommandToken();
+      break;
     case kCommandList:
       DrawSceneCommandList();
       break;
+  }
+  if (command_list_supported_) {
+    BlitFallbackFramebuffer();
   }
 }
 
@@ -334,7 +352,8 @@ void PDWindow::onUIUpdate() {
   const char* combos[] = {
       "Normal",
       "kBasicUniformBuffer",
-      "Command List",
+      "kCommandToken",
+      "kCommandList",
   };
 
   ImGui::Begin(u8"设置");
@@ -352,6 +371,9 @@ void PDWindow::onUIUpdate() {
 
 void PDWindow::onResize(int w, int h) {
   Window::onResize(w, h);
+  if (command_list_supported_) {
+    ResizeCommandListRenderbuffers(w, h);
+  }
   glViewport(0, 0, w, h);
 }
 
@@ -400,6 +422,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
   std::vector<ObjectData> object_datas;
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
   {
+    // TODO: parallel collect data.
     // ProfileTimer timer("collect uniform data");
     auto collect_data_pre_render_func =
         [&object_slot, &object_datas,
@@ -467,7 +490,72 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
   }
 }
 
-void PDWindow::DrawSceneCommandList() {}
+void PDWindow::BindFallbackFramebuffer() {
+  int real_sample_count = 0;
+  glGetIntegerv(GL_SAMPLES, &real_sample_count);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, (int*)&command_list_data_.original_framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
+  if (real_sample_count != kMultiSampleCount) {
+    kMultiSampleCount = real_sample_count;
+    ResizeCommandListRenderbuffers(width, height);
+  }
+}
+
+void PDWindow::BlitFallbackFramebuffer() {
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, command_list_data_.original_framebuffer);
+  glBlitFramebuffer(0 ,0 ,width, height, 0 ,0 ,width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+}
+
+void PDWindow::DrawSceneCommandToken() {
+  if (!command_list_supported_) {
+    return;
+  }
+}
+
+void PDWindow::DrawSceneCommandList() {
+  if (!command_list_supported_) {
+    return;
+  }
+}
+
+void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
+  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, command_list_data_.color_texture);
+  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, kMultiSampleCount,
+                          GL_RGBA8, w, h, GL_TRUE);
+  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,
+                command_list_data_.depth_stencil_texture);
+  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, kMultiSampleCount,
+                          GL_DEPTH24_STENCIL8, w, h, GL_TRUE);
+  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                       command_list_data_.color_texture, 0);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                       command_list_data_.depth_stencil_texture, 0);
+  GLenum draw_buffer{GL_COLOR_ATTACHMENT0};
+  glDrawBuffers(1, &draw_buffer);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    printf("command list framebuffer incomplete!!\n");
+  } else {
+    printf("command list framebuffer complete!!\n");
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void PDWindow::InitializeCommandListResouce() {
+  glGenFramebuffers(1, &command_list_data_.fallback_framebuffer);
+  glGenTextures(1, &command_list_data_.color_texture);
+  glGenTextures(1, &command_list_data_.depth_stencil_texture);
+
+  ResizeCommandListRenderbuffers(width, height);
+}
+
+void PDWindow::FinalizeCommandListResouce() {
+  glDeleteFramebuffers(1, &command_list_data_.fallback_framebuffer);
+  glDeleteTextures(1, &command_list_data_.color_texture);
+  glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
+}
 
 #undef min
 #undef max

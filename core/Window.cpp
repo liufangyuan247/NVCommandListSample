@@ -67,7 +67,7 @@ Window::Window(const char* caption)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-	glfwWindowHint(GLFW_SAMPLES, 4);
+	glfwWindowHint(GLFW_SAMPLES, 1);
 
 	window = glfwCreateWindow(width, height, caption, 0, 0);
 	glfwMakeContextCurrent(window);

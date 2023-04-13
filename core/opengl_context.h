@@ -30,5 +30,5 @@ class OpenGLContext final {
   }
  private:
   OpenGLState states_;
-  bool cache_state_ = false;
+  bool cache_state_ = true;
 };
