@@ -39,7 +39,7 @@ class Mesh {
   void set_uvs(const std::vector<UVType>& uvs) { uvs_ = uvs; }
 
   const std::vector<IndexType> indices() const { return indices_; }
-  void set_positions(const std::vector<IndexType>& indices) {
+  void set_indices(const std::vector<IndexType>& indices) {
     indices_ = indices;
   }
 
@@ -53,6 +53,7 @@ class Mesh {
   static Mesh SerializeFromJson(const nlohmann::json& mesh_json) {
     Mesh mesh;
     std::vector<PositionType> positions;
+    std::vector<IndexType> indices;
     std::string position_data = base64_decode(mesh_json["position"]);
     int position_count = position_data.size() / sizeof(PositionType);
     positions.resize(position_count);
@@ -75,6 +76,12 @@ class Mesh {
       memcpy(colors.data(), color_data.data(), color_data.size());
       mesh.set_colors(colors);
     }
+
+    // indices.resize(positions.size());
+    // for (int i = 0; i < positions.size(); ++i) {
+    //   indices[i] = i;
+    // }
+    // mesh.set_indices(indices);
 
     return mesh;
   }

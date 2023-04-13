@@ -2,6 +2,7 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include "app/extension_command_list.h"
 #include "app/json.hpp"
 #include "core/mesh_renderer.h"
 #include "core/shader_manager.h"

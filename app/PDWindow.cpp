@@ -37,6 +37,14 @@ int UniformBufferAlignedOffset(int size) {
 // constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
 constexpr const char kMapDataFolder[] = "assets/dumped_map_data_compact";
 constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
+constexpr const char kExtensionARBBindlessTexture[] = "GL_ARB_bindless_texture";
+constexpr const char kExtensionNVShaderBufferLoad[] = "GL_NV_shader_buffer_load";
+
+const std::vector<std::string> kCommandListPrerequisiteExtensions = {
+    kExtensionNVCommandList,
+    kExtensionARBBindlessTexture,
+    kExtensionNVShaderBufferLoad,
+};
 
 class ProfileTimer {
  public:
@@ -68,6 +76,15 @@ void GetGLExtension() {
 
 bool ExtensionSupport(const std::string& extension_name) {
   return extensions.find(extension_name) != extensions.end();
+}
+
+bool ExtensionsSupport(const std::vector<std::string>& extension_names) {
+  for (const std::string& extension_name : extension_names) {
+    if (!ExtensionSupport(extension_name)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 nlohmann::json LoadJsonFromFile(const fs::path& path) {
@@ -154,6 +171,87 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
   return objects;
 }
 
+
+std::vector<glm::vec3> points;
+std::vector<float> times;
+std::vector<glm::vec3> tangents;
+
+float radius = 1000.0f;
+int pointsCount = 200;
+float cameraSpeed = 100.0f;
+
+// 初始化Spline的控制点和对应的时间
+void InitSpline(const float radius, const int pointsCount,
+                const float cameraSpeed, std::vector<glm::vec3>& points,
+                std::vector<float>& times, std::vector<glm::vec3>& tangents) {
+  srand(1000);
+  // 随机生成控制点
+  for (int i = 0; i < pointsCount; i++) {
+    float x = static_cast<float>(rand() % 200 - 100) / 100.0f;
+    float y = static_cast<float>(rand() % 200 - 100) / 100.0f;
+    float z = static_cast<float>(rand() % 200) / 200.0f;
+    glm::vec3 point = glm::normalize(glm::vec3(x, y, z)) * radius;
+    points.push_back(point);
+  }
+
+  // 计算切线向量
+  for (int i = 0; i < points.size(); i++) {
+    glm::vec3 tangent;
+    if (i == 0) {
+      tangent = glm::normalize(points[i + 1] - points[i]);
+    } else if (i == points.size() - 1) {
+      tangent = glm::normalize(points[i] - points[i - 1]);
+    } else {
+      tangent = glm::normalize((points[i + 1] - points[i - 1]) / 2.0f);
+    }
+
+    tangents.push_back(tangent);
+  }
+
+  // 计算每个控制点对应的时间值
+  float time = 0.0;
+  for (int i = 0; i < points.size() - 1; i++) {
+    times.push_back(time);
+    float distance = glm::length(points[i + 1] - points[i]);
+    time += distance / cameraSpeed;
+  }
+}
+
+// 根据给定的时间值，计算摄像机的位置和方向
+void ComputeCameraPosition(const float time,
+                           const std::vector<glm::vec3>& points,
+                           const std::vector<float>& times,
+                           const std::vector<glm::vec3>& tangents,
+                           glm::vec3& position, glm::vec3& front) {
+  // 保证时间值在合法范围内
+  float T = glm::clamp(glm::mod(time, times.back()), 0.0f, times.back());
+
+  // 找到time对应的区间
+  int i = 0;
+  while (T > times[i]) {
+    i++;
+  }
+
+  // 根据控制点和切线向量计算插值系数
+  float t = (T - times[i - 1]) / (times[i] - times[i - 1]);
+  glm::vec3 p0 = points[i - 1];
+  glm::vec3 p1 = points[i];
+  glm::vec3 m0 = tangents[i - 1] * (times[i] - times[i - 1]);
+  glm::vec3 m1 = tangents[i] * (times[i] - times[i - 1]);
+  float t2 = t * t;
+  float t3 = t2 * t;
+  glm::vec3 A = 2.0f * p0 - 2.0f * p1 + m0 + m1;
+  glm::vec3 B = -3.0f * p0 + 3.0f * p1 - 2.0f * m0 - m1;
+  glm::vec3 C = m0;
+  glm::vec3 D = p0;
+
+  // 计算摄像机的位置和方向
+  position = A * t3 + B * t2 + C * t + D;
+  glm::vec3 dir = glm::mix(tangents[i - 1], tangents[i], t);
+  dir.z = -glm::abs(dir.z);
+  front = glm::normalize(dir);
+}
+
 }  // namespace
 
 PDWindow::~PDWindow() {
@@ -187,7 +285,8 @@ void PDWindow::onInitialize() {
   printf("uniform_buffer_offset_alignment: %d\n",
          uniform_buffer_offset_alignment);
 
-  command_list_supported_ = ExtensionSupport(kExtensionNVCommandList);
+  command_list_supported_ = ExtensionsSupport(kCommandListPrerequisiteExtensions);
+
   if (command_list_supported_) {
     InitializeCommandListResouce();
   }
@@ -260,6 +359,8 @@ void PDWindow::onInitialize() {
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
+
+  InitSpline(radius, pointsCount, cameraSpeed, points, times, tangents);
 }
 
 void PDWindow::onUpdate() {
@@ -297,6 +398,16 @@ void PDWindow::onUpdate() {
       picth_yaw.x = glm::clamp(picth_yaw.x, -90.0f, 90.0f);
       camera_.set_look_pitch_yaw(picth_yaw);
     }
+  }
+
+  if (roaming_) {
+    glm::vec3 pos;
+    glm::vec3 dir;
+    ComputeCameraPosition(Time::time(), points, times, tangents, pos, dir);
+    float pitch = glm::degrees(glm::asin(dir.z));
+    float yaw = glm::degrees(std::atan2(dir.x, dir.y));
+    camera_.set_look_pitch_yaw({pitch, yaw});
+    camera_.set_target(pos + dir * camera_.distance());
   }
 
   // Compute VP matrix
@@ -365,6 +476,7 @@ void PDWindow::onUIUpdate() {
   bool cache_state = gl_context_.cache_state();
   ImGui::Checkbox(u8"State Cache", &cache_state);
   gl_context_.set_cache_state(cache_state);
+  ImGui::Checkbox(u8"Romaing", &roaming_);
 
   ImGui::End();
 }
@@ -417,7 +529,6 @@ void PDWindow::DrawSceneBasic() {
 
 void PDWindow::DrawSceneBasicUniformBuffer() {
   // Collect uniform data in buffer
-  std::map<const void*, int> object_slot;
   std::vector<RenderObject*> real_render_objects;
   std::vector<ObjectData> object_datas;
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
@@ -425,7 +536,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
     // TODO: parallel collect data.
     // ProfileTimer timer("collect uniform data");
     auto collect_data_pre_render_func =
-        [&object_slot, &object_datas,
+        [&object_datas,
          &real_render_objects](RenderObject* render_object) -> bool {
       bool should_continue = true;
       ObjectData object_data;
@@ -511,6 +622,77 @@ void PDWindow::DrawSceneCommandToken() {
   if (!command_list_supported_) {
     return;
   }
+
+  // Record draw commands
+  std::vector<ObjectData> object_datas;
+  std::vector<GLuint> states;
+  std::vector<GLuint> fbos;
+  std::string token_buffer;
+  NVTokenSequence& token_sequence = command_list_data_.token_sequence;
+  
+  std::vector<RenderObject*> real_render_objects;
+
+  {
+    // TODO: parallel collect data.
+    // ProfileTimer timer("collect uniform data");
+    auto collect_data_pre_render_func =
+        [&object_datas,
+         &real_render_objects](RenderObject* render_object) -> bool {
+      bool should_continue = true;
+      ObjectData object_data;
+      object_data.M = render_object->world();
+      auto line_object = dynamic_cast<const LineObject*>(render_object);
+      if (line_object) {
+        object_data.color = line_object->color();
+        should_continue = false;
+      }
+      auto dashed_stripe_object =
+          dynamic_cast<const DashedStripeObject*>(render_object);
+      if (dashed_stripe_object) {
+        object_data.color = dashed_stripe_object->color();
+        should_continue = false;
+      }
+      auto simple_textured_object =
+          dynamic_cast<const SimpleTexturedObject*>(render_object);
+      if (simple_textured_object) {
+        object_data.color = glm::vec4(simple_textured_object->alpha());
+        should_continue = false;
+      }
+      if (!should_continue) {
+        object_datas.push_back(object_data);
+        real_render_objects.push_back(render_object);
+      }
+      return should_continue;
+    };
+
+    for (auto& object : render_objects_) {
+      object->Render(shader_manager_, collect_data_pre_render_func);
+    }
+  }
+
+  int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
+  {
+    // ProfileTimer timer("upload uniform data");
+    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+    if (object_ubo_size_ < object_datas.size() * data_stride) {
+      glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
+                   GL_DYNAMIC_DRAW);
+      object_ubo_size_ = object_datas.size() * data_stride;
+    }
+    void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    for (int i = 0; i < object_datas.size(); ++i) {
+      memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
+    }
+
+    glUnmapBuffer(GL_UNIFORM_BUFFER);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  }
+
+  // Play draw commands
+
+  // Delete all states
+  glDeleteStatesNV(states.size(), states.data());
+
 }
 
 void PDWindow::DrawSceneCommandList() {
@@ -520,6 +702,17 @@ void PDWindow::DrawSceneCommandList() {
 }
 
 void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
+  if (command_list_data_.color_texture) {
+    glDeleteTextures(1, &command_list_data_.color_texture);
+    glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
+
+    glMakeTextureHandleNonResidentARB(command_list_data_.color_texture_handle);
+    glMakeTextureHandleNonResidentARB(
+        command_list_data_.depth_stencil_texture_handle);
+  }
+  glGenTextures(1, &command_list_data_.color_texture);
+  glGenTextures(1, &command_list_data_.depth_stencil_texture);
+
   glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, command_list_data_.color_texture);
   glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, kMultiSampleCount,
                           GL_RGBA8, w, h, GL_TRUE);
@@ -541,12 +734,20 @@ void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
     printf("command list framebuffer complete!!\n");
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  command_list_data_.color_texture_handle =
+      glGetTextureHandleARB(command_list_data_.color_texture);
+  command_list_data_.depth_stencil_texture_handle =
+      glGetTextureHandleARB(command_list_data_.depth_stencil_texture);
+  printf("color_texture_handle:%x  depth_stencil_texture_handle:%x\n", command_list_data_.color_texture_handle,
+  command_list_data_.depth_stencil_texture_handle);
+  glMakeTextureHandleResidentARB(command_list_data_.color_texture_handle);
+  glMakeTextureHandleResidentARB(
+      command_list_data_.depth_stencil_texture_handle);
 }
 
 void PDWindow::InitializeCommandListResouce() {
   glGenFramebuffers(1, &command_list_data_.fallback_framebuffer);
-  glGenTextures(1, &command_list_data_.color_texture);
-  glGenTextures(1, &command_list_data_.depth_stencil_texture);
 
   ResizeCommandListRenderbuffers(width, height);
 }
@@ -555,6 +756,10 @@ void PDWindow::FinalizeCommandListResouce() {
   glDeleteFramebuffers(1, &command_list_data_.fallback_framebuffer);
   glDeleteTextures(1, &command_list_data_.color_texture);
   glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
+
+  glMakeTextureHandleNonResidentARB(command_list_data_.color_texture_handle);
+  glMakeTextureHandleNonResidentARB(
+      command_list_data_.depth_stencil_texture_handle);
 }
 
 #undef min

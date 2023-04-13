@@ -8,11 +8,17 @@ class MeshRenderer {
  public:
   MeshRenderer() = default;
   ~MeshRenderer() {
+    glMakeNamedBufferNonResidentNV(vbo_);
+    if (mesh_.indexed_draw()) {
+      glMakeNamedBufferNonResidentNV(ibo_);
+    }
+
     glDeleteVertexArrays(1, &vao_);
     glDeleteBuffers(1, &vbo_);
     glDeleteBuffers(1, &ibo_);    
   }
   void set_mesh(Mesh&& mesh) { mesh_ = mesh; }
+  const Mesh& mesh() const { return mesh_; }
 
   bool initialized() const { return vao_; }
   void Initialize() {
@@ -31,80 +37,41 @@ class MeshRenderer {
 
     glBindVertexArray(vao_);
 
-    // Build interleaved buffer data
-    struct VertexAttribData {
-      int attrib_location;
-      GLenum attrib_type;
-      int component_size;
-      GLenum normalized;
-      int element_offset;
-      int element_size;
-      const void* source;
-    };
-
-    int current_offset = 0;
-    std::vector<VertexAttribData> vertex_attribs;
-    vertex_attribs.push_back(
-        VertexAttribData{.attrib_location = POSITION,
-                         .attrib_type = GL_FLOAT,
-                         .component_size = 3,
-                         .normalized = GL_FALSE,
-                         .element_offset = current_offset,
-                         .element_size = sizeof(Mesh::PositionType),
-                         .source = mesh_.positions().data()});
-
-    if (mesh_.colors().size()) {
-      current_offset += vertex_attribs.back().element_size;
-      vertex_attribs.push_back(
-          VertexAttribData{.attrib_location = COLOR,
-                           .attrib_type = GL_UNSIGNED_BYTE,
-                           .component_size = 4,
-                           .normalized = GL_TRUE,
-                           .element_offset = current_offset,
-                           .element_size = sizeof(Mesh::ColorType),
-                           .source = mesh_.colors().data()});
-    }
-
-    if (mesh_.uvs().size()) {
-      current_offset += vertex_attribs.back().element_size;
-      vertex_attribs.push_back(
-          VertexAttribData{.attrib_location = UV,
-                           .attrib_type = GL_FLOAT,
-                           .component_size = 2,
-                           .normalized = GL_FALSE,
-                           .element_offset = current_offset,
-                           .element_size = sizeof(Mesh::UVType),
-                           .source = mesh_.uvs().data()});
-    }
-    current_offset += vertex_attribs.back().element_size;
-
+    int stride = SetupVertexAttribFormat();
     int vertex_count = mesh_.positions().size();
-    int stride = current_offset;
     int total_size = stride * vertex_count;
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, total_size, 0, GL_STATIC_DRAW);
 
-    void *buffer = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-    for (const auto& attrib_data : vertex_attribs) {
-      // Copy data
-      for (int i = 0; i < vertex_count; ++i) {
-        void* dst_ptr = buffer + (i * stride) + attrib_data.element_offset;
-        const void* src_ptr = attrib_data.source + i * attrib_data.element_size;
-        memcpy(dst_ptr, src_ptr, attrib_data.element_size);
+    void* buffer = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    for (int i = 0; i < vertex_count; ++i) {
+      memcpy(buffer, &mesh_.positions()[i], sizeof(Mesh::PositionType));
+      buffer += sizeof(Mesh::PositionType);
+      if (mesh_.colors().size()) {
+        memcpy(buffer, &mesh_.colors()[i], sizeof(Mesh::ColorType));
+        buffer += sizeof(Mesh::ColorType);
       }
-
-      // Set up attrib format
-      glEnableVertexAttribArray(attrib_data.attrib_location);
-      glVertexAttribFormat(attrib_data.attrib_location,
-                           attrib_data.component_size, attrib_data.attrib_type,
-                           attrib_data.normalized, attrib_data.element_offset);
-      glVertexAttribBinding(attrib_data.attrib_location, 0);
+      if (mesh_.uvs().size()) {
+        memcpy(buffer, &mesh_.uvs()[i], sizeof(Mesh::UVType));
+        buffer += sizeof(Mesh::UVType);
+      }
     }
     glUnmapBuffer(GL_ARRAY_BUFFER);
-
     glBindVertexBuffer(0, vbo_, 0, stride);
-    glVertexBindingDivisor(0, 0);
+
+    glGetNamedBufferParameterui64vNV(vbo_, GL_BUFFER_GPU_ADDRESS_NV, &vbo_address_);
+    glMakeNamedBufferResidentNV(vbo_, GL_READ_ONLY);
+
+    if (mesh_.indexed_draw()) {
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                   sizeof(Mesh::IndexType) * mesh_.indices().size(),
+                   mesh_.indices().data(), GL_STATIC_DRAW);
+
+      glGetNamedBufferParameterui64vNV(ibo_, GL_BUFFER_GPU_ADDRESS_NV, &ibo_address_);
+      glMakeNamedBufferResidentNV(ibo_, GL_READ_ONLY);
+    }
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -123,9 +90,37 @@ class MeshRenderer {
     }
   }
 
+  int SetupVertexAttribFormat() {
+    int offset = 0;
+    glEnableVertexAttribArray(POSITION);
+    glVertexAttribFormat(POSITION, Mesh::PositionType::length(), GL_FLOAT,
+                         GL_FALSE, offset);
+    glVertexAttribBinding(POSITION, 0);
+    offset += sizeof(Mesh::PositionType);
+    if (mesh_.colors().size()) {
+      glEnableVertexAttribArray(COLOR);
+      glVertexAttribFormat(COLOR, Mesh::ColorType::length(), GL_UNSIGNED_BYTE,
+                           GL_TRUE, offset);
+      glVertexAttribBinding(COLOR, 0);
+      offset += sizeof(Mesh::ColorType);
+    }
+    if (mesh_.uvs().size()) {
+      glEnableVertexAttribArray(UV);
+      glVertexAttribFormat(UV, Mesh::ColorType::length(), GL_FLOAT, GL_FALSE,
+                           offset);
+      glVertexAttribBinding(UV, 0);
+      offset += sizeof(Mesh::UVType);
+    }
+    glBindVertexBuffer(0, 0, 0, offset);
+    glVertexBindingDivisor(0, 0);
+    return offset;
+  }
+
  private:
   GLuint vao_ = 0;
   GLuint vbo_ = 0;
   GLuint ibo_ = 0;
+  GLuint64 vbo_address_ = 0;
+  GLuint64 ibo_address_ = 0;
   Mesh mesh_;
 };

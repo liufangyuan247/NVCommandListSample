@@ -67,9 +67,13 @@ class PDWindow : public Window {
   struct CommandListExtensionData {
     // resizes
     GLuint fallback_framebuffer = 0;
-    GLuint color_texture = 0;
-    GLuint depth_stencil_texture = 0;
     GLuint original_framebuffer = 0;
+
+    GLuint color_texture = 0;
+    GLuint64 color_texture_handle = 0;
+
+    GLuint depth_stencil_texture = 0;
+    GLuint64 depth_stencil_texture_handle = 0;
 
     std::vector<GLuint> all_states;
 
@@ -79,6 +83,8 @@ class PDWindow : public Window {
   } command_list_data_;
 
   bool command_list_supported_ = false;
+
+  bool roaming_ = false;
 
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
