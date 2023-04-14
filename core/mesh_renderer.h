@@ -37,9 +37,9 @@ class MeshRenderer {
 
     glBindVertexArray(vao_);
 
-    int stride = SetupVertexAttribFormat();
+    element_stride_ = SetupVertexAttribFormat();
     int vertex_count = mesh_.positions().size();
-    int total_size = stride * vertex_count;
+    int total_size = element_stride_ * vertex_count;
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, total_size, 0, GL_STATIC_DRAW);
@@ -58,7 +58,7 @@ class MeshRenderer {
       }
     }
     glUnmapBuffer(GL_ARRAY_BUFFER);
-    glBindVertexBuffer(0, vbo_, 0, stride);
+    glBindVertexBuffer(0, vbo_, 0, element_stride_);
 
     glGetNamedBufferParameterui64vNV(vbo_, GL_BUFFER_GPU_ADDRESS_NV, &vbo_address_);
     glMakeNamedBufferResidentNV(vbo_, GL_READ_ONLY);
@@ -83,6 +83,8 @@ class MeshRenderer {
       return;
     }
     glBindVertexArray(vao_);
+    glBindVertexBuffer(0, vbo_, 0, element_stride_);
+
     if (mesh_.indexed_draw()) {
       glDrawElements(mesh_.draw_mode(), mesh_.indices().size(), GL_UNSIGNED_INT, 0);
     } else {
@@ -131,4 +133,5 @@ class MeshRenderer {
   GLuint64 vbo_address_ = 0;
   GLuint64 ibo_address_ = 0;
   Mesh mesh_;
+  int element_stride_ = 0;
 };

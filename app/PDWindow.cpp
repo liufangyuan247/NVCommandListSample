@@ -21,25 +21,50 @@ namespace {
 
 using SceneData = common::SceneData;
 using ObjectData = common::ObjectData;
-using milli = std::chrono::milliseconds;
+using us = std::chrono::microseconds;
 namespace fs = std::experimental::filesystem;
 using namespace nvgl;
 
+class ProfileTimerGroup {
+ public:
+  ProfileTimerGroup(const std::string& entry_name) : entry_name_(entry_name) {}
+  ~ProfileTimerGroup() {
+    printf("%s took %.2f ms\n", entry_name_.c_str(),
+           std::chrono::duration_cast<us>(elapsed_time_).count() * 0.001f);
+  }
+
+  void AddTime(
+      const std::chrono::high_resolution_clock::duration& elapsed_time) {
+    elapsed_time_ += elapsed_time;
+  }
+
+ private:
+  std::string entry_name_;
+  std::chrono::high_resolution_clock::duration elapsed_time_{0};
+  std::chrono::time_point<std::chrono::system_clock> start_;
+};
+
 class ProfileTimer {
  public:
-  ProfileTimer(const std::string& entry_name) : entry_name_(entry_name) {
+  ProfileTimer(const std::string& entry_name,
+               ProfileTimerGroup* group = nullptr)
+      : entry_name_(entry_name), group_(group) {
     start_ = std::chrono::high_resolution_clock::now();
   }
   ~ProfileTimer() {
     auto finish = std::chrono::high_resolution_clock::now();
-    std::cout << entry_name_ << " took "
-              << std::chrono::duration_cast<milli>(finish - start_).count()
-              << " milliseconds\n";
+    if (!group_) {
+      printf("%s took %.2f ms\n", entry_name_.c_str(),
+             std::chrono::duration_cast<us>(finish - start_).count() * 0.001f);
+    } else {
+      group_->AddTime(finish - start_);
+    }
   }
 
  private:
   std::string entry_name_;
   std::chrono::time_point<std::chrono::system_clock> start_;
+  ProfileTimerGroup* group_ = nullptr;
 };
 
 std::set<std::string> extensions;
@@ -154,7 +179,7 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
        fs::directory_iterator(fs::path(map_directory))) {
     files.push_back(directory_entry.path());
   }
-  files.resize(100);
+  // files.resize(100);
 
   std::vector<std::unique_ptr<RenderObject>> objects(files.size());
   std::atomic_int slot_idx{0};
@@ -311,28 +336,17 @@ void PDWindow::onInitialize() {
     InitializeCommandListResouce();
   }
 
-  // glEnableClientState(GL_VERTEX_ATTRIB_ARRAY_UNIFIED_NV);
-  // glEnableClientState(GL_ELEMENT_ARRAY_UNIFIED_NV);
-  glEnableClientState(GL_UNIFORM_BUFFER_UNIFIED_NV);
-
-/*
-  glBufferAddressRangeNV(GL_VERTEX_ATTRIB_ARRAY_ADDRESS_NV, 0, 0, 0);
-  glBufferAddressRangeNV(GL_ELEMENT_ARRAY_ADDRESS_NV, 0, 0, 0);
-  glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_OBJECT, 0, 0);
-  glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_SCENE, 0, 0);
-*/
   // UBO
   glGenBuffers(1, &scene_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  // glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
+  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
 
   if (command_list_supported_) {
     glGetNamedBufferParameterui64vNV(scene_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
                                      &scene_ubo_address_);
     glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
-    glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_SCENE, scene_ubo_address_, sizeof(SceneData));
   }
 
   glGenBuffers(1, &object_ubo_);
@@ -462,7 +476,7 @@ void PDWindow::onUpdate() {
 }
 
 void PDWindow::onRender() {
-  // ProfileTimer timer("OnRender");
+  ProfileTimer timer("OnRender");
   if (command_list_supported_) {
     BindFallbackFramebuffer();
   }
@@ -510,6 +524,12 @@ void PDWindow::onUIUpdate() {
   gl_context_.set_cache_state(cache_state);
   ImGui::Checkbox(u8"Romaing", &roaming_);
 
+  ImGui::Checkbox(u8"Selective Draw", &selective_draw_);
+  ImGui::DragInt(u8"Selective Draw Start", &selective_draw_start_, 1, 0,
+                 command_list_data_.token_sequence.offsets.size());
+  ImGui::DragInt(u8"Selective Draw Count", &selective_draw_count_, 1, 0,
+                 command_list_data_.token_sequence.offsets.size());
+
   ImGui::End();
 }
 
@@ -531,9 +551,9 @@ void PDWindow::DrawSceneBasic() {
     GLuint program = shader_manager_.GetShader(render_object->shader());
     gl_context.glUseProgram(program);
 
-    int M_loc = glGetUniformLocation(program, "M");
-    int color_loc = glGetUniformLocation(program, "color");
-    int alpha_loc = glGetUniformLocation(program, "in_alpha");
+    int M_loc = program ? glGetUniformLocation(program, "M") : -1;
+    int color_loc = program ? glGetUniformLocation(program, "color") : -1;
+    int alpha_loc = program ? glGetUniformLocation(program, "in_alpha") : -1;
     if (M_loc != -1) {
       glUniformMatrix4fv(M_loc, 1, GL_FALSE,
                          glm::value_ptr(render_object->world()));
@@ -611,12 +631,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
       glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
                    GL_DYNAMIC_DRAW);
       object_ubo_size_ = object_datas.size() * data_stride;
-
-      if (command_list_supported_) {
-        glGetNamedBufferParameterui64vNV(object_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                        &object_ubo_address_);
-        glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
-      }
+      object_ubo_address_ = 0;
     }
     void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
     for (int i = 0; i < object_datas.size(); ++i) {
@@ -634,12 +649,8 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
       const RenderObject* object = real_render_objects[i];
       GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
       gl_context_.glUseProgram(program);
-      // glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
-      //                   i * data_stride, sizeof(ObjectData));
-      // printf("ubo object address: %lld\n", object_ubo_address_ + i * data_stride);
-      glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_OBJECT,
-                             object_ubo_address_ + i * data_stride,
-                             sizeof(ObjectData));
+      glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
+                        i * data_stride, sizeof(ObjectData));
       const_cast<RenderObject*>(object)->Render(shader_manager_);
     }
   }
@@ -671,230 +682,251 @@ void PDWindow::DrawSceneCommandToken() {
     return;
   }
 
-  // Record draw commands
-  std::vector<ObjectData> object_datas;
-  std::string& token_buffer = command_list_data_.command_stream_buffer_cpu_;
-  token_buffer.clear();
-  NVTokenSequence& token_sequence = command_list_data_.token_sequence;
+  if (!command_list_data_.draw_commands_compiled) {  // Record draw commands
+    std::vector<ObjectData> object_datas;
+    std::string& token_buffer = command_list_data_.command_stream_buffer_cpu_;
+    token_buffer.clear();
+    NVTokenSequence& token_sequence = command_list_data_.token_sequence;
 
-  std::vector<RenderObject*> real_render_objects;
-  {
-    // TODO: parallel collect data.
-    // ProfileTimer timer("collect render datas");
-    auto collect_data_pre_render_func =
-        [&object_datas,
-         &real_render_objects](RenderObject* render_object) -> bool {
-      bool should_continue = true;
-      ObjectData object_data;
-      object_data.M = render_object->world();
-      auto line_object = dynamic_cast<const LineObject*>(render_object);
-      if (line_object) {
-        object_data.color = line_object->color();
-        should_continue = false;
-      }
-      auto dashed_stripe_object =
-          dynamic_cast<const DashedStripeObject*>(render_object);
-      if (dashed_stripe_object) {
-        object_data.color = dashed_stripe_object->color();
-        should_continue = false;
-      }
-      auto simple_textured_object =
-          dynamic_cast<const SimpleTexturedObject*>(render_object);
-      if (simple_textured_object) {
-        object_data.color = glm::vec4(simple_textured_object->alpha());
-        should_continue = false;
-      }
-      if (!should_continue) {
-        object_datas.push_back(object_data);
-        real_render_objects.push_back(render_object);
-      }
-      return should_continue;
-    };
+    std::vector<RenderObject*> real_render_objects;
+    {
+      // TODO: parallel collect data.
+      ProfileTimer timer("  collect render datas");
+      auto collect_data_pre_render_func =
+          [&object_datas,
+           &real_render_objects](RenderObject* render_object) -> bool {
+        bool should_continue = true;
+        ObjectData object_data;
+        object_data.M = render_object->world();
+        auto line_object = dynamic_cast<const LineObject*>(render_object);
+        if (line_object) {
+          object_data.color = line_object->color();
+          should_continue = false;
+        }
+        auto dashed_stripe_object =
+            dynamic_cast<const DashedStripeObject*>(render_object);
+        if (dashed_stripe_object) {
+          object_data.color = dashed_stripe_object->color();
+          should_continue = false;
+        }
+        auto simple_textured_object =
+            dynamic_cast<const SimpleTexturedObject*>(render_object);
+        if (simple_textured_object) {
+          object_data.color = glm::vec4(simple_textured_object->alpha());
+          should_continue = false;
+        }
+        if (!should_continue) {
+          object_datas.push_back(object_data);
+          real_render_objects.push_back(render_object);
+        }
+        return should_continue;
+      };
 
-    for (auto& object : render_objects_) {
-      object->Render(shader_manager_, collect_data_pre_render_func);
-    }
-  }
-
-  token_sequence.offsets.resize(object_datas.size());
-  token_sequence.sizes.resize(object_datas.size());
-  token_sequence.states.resize(object_datas.size());
-  token_sequence.fbos.resize(object_datas.size(),
-                             command_list_data_.fallback_framebuffer);
-
-  {
-    // ProfileTimer timer("create states");
-    glCreateStatesNV(token_sequence.states.size(),
-                     token_sequence.states.data());
-  }
-  // Setup token buffer
-  int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
-  {
-    ProfileTimer timer("record draw commands");
-    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
-    if (object_ubo_size_ < object_datas.size() * data_stride) {
-      glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
-                   GL_DYNAMIC_DRAW);
-      object_ubo_size_ = object_datas.size() * data_stride;
-      glGetNamedBufferParameterui64vNV(object_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                       &object_ubo_address_);
-      glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
+      for (auto& object : render_objects_) {
+        object->Render(shader_manager_, collect_data_pre_render_func);
+      }
     }
 
-    void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    token_sequence.offsets.resize(object_datas.size());
+    token_sequence.sizes.resize(object_datas.size());
+    token_sequence.states.resize(object_datas.size());
+    token_sequence.fbos.resize(object_datas.size(),
+                               command_list_data_.fallback_framebuffer);
 
-    // Build token buffer
-    for (int i = 0; i < object_datas.size(); ++i) {
-      memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
-
-      // Setup state
-      const RenderObject* object = real_render_objects[i];
-      GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
-      gl_context_.glUseProgram(program);
-      auto line_object = dynamic_cast<const LineObject*>(object);
-      if (line_object) {
-        glEnable(GL_LINE_STIPPLE);
-        glLineStipple(line_object->line_style().line_stipple_factor,
-                      line_object->line_style().line_stipple_pattern);
+    {
+      ProfileTimer timer("  create states");
+      glCreateStatesNV(token_sequence.states.size(),
+                       token_sequence.states.data());
+    }
+    // Setup token buffer
+    int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
+    {
+      glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
+      if (object_ubo_size_ < object_datas.size() * data_stride) {
+        glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
+                     GL_DYNAMIC_DRAW);
+        object_ubo_size_ = object_datas.size() * data_stride;
+        object_ubo_address_ = 0;
+      }
+      if (!object_ubo_address_) {
+        glGetNamedBufferParameterui64vNV(object_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                         &object_ubo_address_);
+        glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
       }
 
-      object->mesh_renderer().SetupVertexAttribFormat();
+      void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
 
-      // Capture state
-      glStateCaptureNV(
-          token_sequence.states[i],
-          GetBaseDrawMode(object->mesh_renderer().mesh().draw_mode()));
-      // Restore state
-      if (line_object) {
-        glDisable(GL_LINE_STIPPLE);
+      // Build token buffer
+      for (int i = 0; i < object_datas.size(); ++i) {
+        memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
+
+        // Setup state
+        const RenderObject* object = real_render_objects[i];
+        auto line_object = dynamic_cast<const LineObject*>(object);
+        {
+          GLuint program =
+              shader_manager_.GetShader(object->shader() + "_uniform");
+          gl_context_.glUseProgram(program);
+          if (line_object && line_object->line_style().line_stipple) {
+            glEnable(GL_LINE_STIPPLE);
+            glLineStipple(line_object->line_style().line_stipple_factor,
+                          line_object->line_style().line_stipple_pattern);
+          }
+
+          // TODO: 为什么这个打开会崩溃？
+          object->mesh_renderer().SetupVertexAttribFormat();
+
+          // Capture state
+          {
+            glStateCaptureNV(
+                token_sequence.states[i],
+                GetBaseDrawMode(object->mesh_renderer().mesh().draw_mode()));
+          }
+          // Restore state
+          if (line_object && line_object->line_style().line_stipple) {
+            glDisable(GL_LINE_STIPPLE);
+          }
+        }
+
+        // record draw command
+        GLintptr offset = token_buffer.size();
+
+        // Set up uniform binding info
+        {
+          uint header = glGetCommandHeaderNV(GL_UNIFORM_ADDRESS_COMMAND_NV,
+                                             sizeof(UniformAddressCommandNV));
+          uint64_t uniform_buffer_address =
+              object_ubo_address_ + i * data_stride;
+          PushCommandToBuffer(
+              UniformAddressCommandNV{header, UBO_OBJECT,
+                                      glGetStageIndexNV(GL_VERTEX_SHADER),
+                                      uniform_buffer_address},
+              &token_buffer);
+          PushCommandToBuffer(
+              UniformAddressCommandNV{header, UBO_OBJECT,
+                                      glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                                      uniform_buffer_address},
+              &token_buffer);
+          PushCommandToBuffer(
+              UniformAddressCommandNV{header, UBO_SCENE,
+                                      glGetStageIndexNV(GL_VERTEX_SHADER),
+                                      scene_ubo_address_},
+              &token_buffer);
+          PushCommandToBuffer(
+              UniformAddressCommandNV{header, UBO_SCENE,
+                                      glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                                      scene_ubo_address_},
+              &token_buffer);
+        }
+
+        // Set up vertex attrib binding info
+        {
+          uint header = glGetCommandHeaderNV(GL_ATTRIBUTE_ADDRESS_COMMAND_NV,
+                                             sizeof(AttributeAddressCommandNV));
+          PushCommandToBuffer(
+              AttributeAddressCommandNV{header, 0,
+                                        object->mesh_renderer().vbo_address()},
+              &token_buffer);
+        }
+        // Set up index binding info
+        if (object->mesh_renderer().mesh().indexed_draw()) {
+          uint header = glGetCommandHeaderNV(GL_ELEMENT_ADDRESS_COMMAND_NV,
+                                             sizeof(ElementAddressCommandNV));
+          PushCommandToBuffer(
+              ElementAddressCommandNV{header,
+                                      object->mesh_renderer().ibo_address(),
+                                      sizeof(Mesh::IndexType)},
+              &token_buffer);
+        }
+
+        // Set up aux info
+        if (line_object) {
+          uint header = glGetCommandHeaderNV(GL_LINE_WIDTH_COMMAND_NV,
+                                             sizeof(LineWidthCommandNV));
+          PushCommandToBuffer(
+              LineWidthCommandNV{header, line_object->line_style().line_width},
+              &token_buffer);
+        }
+
+        // Set up draw command
+        if (object->mesh_renderer().mesh().indexed_draw()) {
+          uint header =
+              glGetCommandHeaderNV(GL_DRAW_ELEMENTS_INSTANCED_COMMAND_NV,
+                                   sizeof(DrawElementsInstancedCommandNV));
+          PushCommandToBuffer(
+              DrawElementsInstancedCommandNV{
+                  header, object->mesh_renderer().mesh().draw_mode(),
+                  (unsigned int)object->mesh_renderer().mesh().indices().size(),
+                  1, 0, 0, 0},
+              &token_buffer);
+        } else {
+          uint header =
+              glGetCommandHeaderNV(GL_DRAW_ARRAYS_INSTANCED_COMMAND_NV,
+                                   sizeof(DrawArraysInstancedCommandNV));
+          PushCommandToBuffer(
+              DrawArraysInstancedCommandNV{
+                  header, object->mesh_renderer().mesh().draw_mode(),
+                  (unsigned int)object->mesh_renderer()
+                      .mesh()
+                      .positions()
+                      .size(),
+                  1, 0, 0},
+              &token_buffer);
+        }
+
+        int size = token_buffer.size() - offset;
+        token_sequence.offsets[i] = offset;
+        token_sequence.sizes[i] = size;
       }
-      // record draw command
+      glUnmapBuffer(GL_UNIFORM_BUFFER);
+      glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-      GLintptr offset = token_buffer.size();
-
-      // Set up uniform binding info
-      {
-        uint header = glGetCommandHeaderNV(GL_UNIFORM_ADDRESS_COMMAND_NV,
-                                           sizeof(UniformAddressCommandNV));
-        uint64_t uniform_buffer_address = object_ubo_address_ + i * data_stride;
-        PushCommandToBuffer(
-            UniformAddressCommandNV{header, UBO_OBJECT,
-                                    glGetStageIndexNV(GL_VERTEX_SHADER),
-                                    uniform_buffer_address},
-            &token_buffer);
-        PushCommandToBuffer(
-            UniformAddressCommandNV{header, UBO_OBJECT,
-                                    glGetStageIndexNV(GL_FRAGMENT_SHADER),
-                                    uniform_buffer_address},
-            &token_buffer);
-        PushCommandToBuffer(
-            UniformAddressCommandNV{header, UBO_SCENE,
-                                    glGetStageIndexNV(GL_VERTEX_SHADER),
-                                    scene_ubo_address_},
-            &token_buffer);
-        PushCommandToBuffer(
-            UniformAddressCommandNV{header, UBO_SCENE,
-                                    glGetStageIndexNV(GL_FRAGMENT_SHADER),
-                                    scene_ubo_address_},
-            &token_buffer);
-      }
-
-      // Set up vertex attrib binding info
-      {
-        uint header = glGetCommandHeaderNV(GL_ATTRIBUTE_ADDRESS_COMMAND_NV,
-                                           sizeof(AttributeAddressCommandNV));
-        PushCommandToBuffer(
-            AttributeAddressCommandNV{header, 0,
-                                      object->mesh_renderer().vbo_address()},
-            &token_buffer);
-      }
-      // Set up index binding info
-      if (object->mesh_renderer().mesh().indexed_draw()) {
-        uint header = glGetCommandHeaderNV(GL_ELEMENT_ADDRESS_COMMAND_NV,
-                                           sizeof(ElementAddressCommandNV));
-        PushCommandToBuffer(
-            ElementAddressCommandNV{header,
-                                    object->mesh_renderer().ibo_address(),
-                                    sizeof(Mesh::IndexType)},
-            &token_buffer);
-      }
-
-      // Set up aux info
-      if (line_object) {
-        uint header = glGetCommandHeaderNV(GL_LINE_WIDTH_COMMAND_NV,
-                                           sizeof(LineWidthCommandNV));
-        PushCommandToBuffer(
-            LineWidthCommandNV{header, line_object->line_style().line_width},
-            &token_buffer);
-      }
-
-      // Set up draw command
-      if (object->mesh_renderer().mesh().indexed_draw()) {
-        uint header =
-            glGetCommandHeaderNV(GL_DRAW_ELEMENTS_INSTANCED_COMMAND_NV,
-                                 sizeof(DrawElementsInstancedCommandNV));
-        PushCommandToBuffer(
-            DrawElementsInstancedCommandNV{
-                header, object->mesh_renderer().mesh().draw_mode(),
-                (unsigned int)object->mesh_renderer().mesh().indices().size(),
-                1, 0, 0, 0},
-            &token_buffer);
+      // Transfer data to buffer
+      if (command_list_data_.command_stream_buffer_size < token_buffer.size()) {
+        glNamedBufferData(command_list_data_.command_stream_buffer,
+                          token_buffer.size(), token_buffer.c_str(),
+                          GL_DYNAMIC_DRAW);
+        command_list_data_.command_stream_buffer_size = token_buffer.size();
       } else {
-        uint header =
-            glGetCommandHeaderNV(GL_DRAW_ARRAYS_INSTANCED_COMMAND_NV,
-                                 sizeof(DrawArraysInstancedCommandNV));
-        PushCommandToBuffer(
-            DrawArraysInstancedCommandNV{
-                header, object->mesh_renderer().mesh().draw_mode(),
-                (unsigned int)object->mesh_renderer().mesh().positions().size(),
-                1, 0, 0},
-            &token_buffer);
+        glNamedBufferSubData(command_list_data_.command_stream_buffer, 0,
+                             token_buffer.size(), token_buffer.c_str());
       }
-
-      int size = token_buffer.size() - offset;
-      token_sequence.offsets[i] = offset;
-      token_sequence.sizes[i] = size;
     }
-    glUnmapBuffer(GL_UNIFORM_BUFFER);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-    // Transfer data to buffer
-    if (command_list_data_.command_stream_buffer_size < token_buffer.size()) {
-      glNamedBufferData(command_list_data_.command_stream_buffer,
-                        token_buffer.size(), token_buffer.c_str(),
-                        GL_DYNAMIC_DRAW);
-      command_list_data_.command_stream_buffer_size = token_buffer.size();
-    } else {
-      glNamedBufferSubData(command_list_data_.command_stream_buffer, 0,
-                           token_buffer.size(), token_buffer.c_str());
-    }
+    command_list_data_.draw_commands_compiled = true;
   }
 
   {
-    // ProfileTimer timer("Play draw commands");
-
+    ProfileTimer timer("  Play draw commands");
+    glDisable(GL_LINE_STIPPLE);
     // Play draw commands
-    // glDrawCommandsStatesNV(command_list_data_.command_stream_buffer,
-    //                       command_list_data_.token_sequence.offsets.data(),
-    //                       command_list_data_.token_sequence.sizes.data(),
-    //                       command_list_data_.token_sequence.states.data(),
-    //                       command_list_data_.token_sequence.fbos.data(),
-    //                       command_list_data_.token_sequence.offsets.size());
-
-    glDrawCommandsNV(GL_LINES, command_list_data_.command_stream_buffer,
-                     command_list_data_.token_sequence.offsets.data(),
-                     command_list_data_.token_sequence.sizes.data(),
-                     command_list_data_.token_sequence.offsets.size());
-    glDrawCommandsNV(GL_TRIANGLES, command_list_data_.command_stream_buffer,
-                     command_list_data_.token_sequence.offsets.data(),
-                     command_list_data_.token_sequence.sizes.data(),
-                     command_list_data_.token_sequence.offsets.size());
+    if (!selective_draw_) {
+      glDrawCommandsStatesNV(command_list_data_.command_stream_buffer,
+                             command_list_data_.token_sequence.offsets.data(),
+                             command_list_data_.token_sequence.sizes.data(),
+                             command_list_data_.token_sequence.states.data(),
+                             command_list_data_.token_sequence.fbos.data(),
+                             command_list_data_.token_sequence.offsets.size());
+    } else {
+      int start =
+          glm::clamp<int>(selective_draw_start_, 0,
+                          command_list_data_.token_sequence.offsets.size() - 1);
+      int end =
+          glm::clamp<int>(selective_draw_start_ + selective_draw_count_, start,
+                          command_list_data_.token_sequence.offsets.size() - 1);
+      glDrawCommandsStatesNV(
+          command_list_data_.command_stream_buffer,
+          command_list_data_.token_sequence.offsets.data() + start,
+          command_list_data_.token_sequence.sizes.data() + start,
+          command_list_data_.token_sequence.states.data() + start,
+          command_list_data_.token_sequence.fbos.data() + start,
+          end - start + 1);
+    }
   }
   // Delete all states
   {
     // ProfileTimer timer("delete states");
-    glDeleteStatesNV(token_sequence.states.size(),
-                     token_sequence.states.data());
+    // glDeleteStatesNV(command_list_data_.token_sequence.states.size(),
+    //                  command_list_data_.token_sequence.states.data());
   }
 }
 

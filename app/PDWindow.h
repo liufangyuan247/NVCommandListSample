@@ -79,8 +79,7 @@ class PDWindow : public Window {
     GLuint depth_stencil_texture = 0;
     GLuint64 depth_stencil_texture_handle = 0;
 
-    std::vector<GLuint> all_states;
-
+    bool draw_commands_compiled = false;
     GLuint command_stream_buffer = 0;
     uint64_t command_stream_buffer_size = 0;
     std::string command_stream_buffer_cpu_;
@@ -91,6 +90,9 @@ class PDWindow : public Window {
   bool command_list_supported_ = false;
 
   bool roaming_ = false;
+  bool selective_draw_ = false;
+  int selective_draw_start_ = 0;
+  int selective_draw_count_ = 0;
 
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
