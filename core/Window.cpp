@@ -120,7 +120,7 @@ Window::Window(const char* caption)
 	glewExperimental=true;
 	glewInit();
 
-	// glEnable(GL_DEBUG_OUTPUT);
+	glEnable(GL_DEBUG_OUTPUT);
 	glDebugMessageCallback(MessageCallback, 0);
 
 	allWindows[window] = this;

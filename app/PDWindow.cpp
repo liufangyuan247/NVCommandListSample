@@ -298,10 +298,6 @@ void PDWindow::onInitialize() {
   ImGui::StyleColorsDark();
   GetGLExtension();
 
-  int max_uniform_buffer_size = 0;
-  glGetIntegerv(GL_UNIFORM_BUFFER_SIZE, &max_uniform_buffer_size);
-  printf("max_uniform_buffer_size: %d\n", max_uniform_buffer_size);
-
   int uniform_buffer_offset_alignment = 0;
   glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
                 &uniform_buffer_offset_alignment);
@@ -315,27 +311,33 @@ void PDWindow::onInitialize() {
     InitializeCommandListResouce();
   }
 
+  // glEnableClientState(GL_VERTEX_ATTRIB_ARRAY_UNIFIED_NV);
+  // glEnableClientState(GL_ELEMENT_ARRAY_UNIFIED_NV);
+  glEnableClientState(GL_UNIFORM_BUFFER_UNIFIED_NV);
+
+/*
+  glBufferAddressRangeNV(GL_VERTEX_ATTRIB_ARRAY_ADDRESS_NV, 0, 0, 0);
+  glBufferAddressRangeNV(GL_ELEMENT_ARRAY_ADDRESS_NV, 0, 0, 0);
+  glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_OBJECT, 0, 0);
+  glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_SCENE, 0, 0);
+*/
   // UBO
   glGenBuffers(1, &scene_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
+  // glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
+
   if (command_list_supported_) {
     glGetNamedBufferParameterui64vNV(scene_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
                                      &scene_ubo_address_);
     glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
+    glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_SCENE, scene_ubo_address_, sizeof(SceneData));
   }
 
   glGenBuffers(1, &object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  // int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
-  // glBufferData(GL_UNIFORM_BUFFER, data_stride * render_objects_.size(),
-  // nullptr,
-  //              GL_DYNAMIC_DRAW);
-  // glBindBuffer(GL_UNIFORM_BUFFER, 0);
-  // glBindBufferBase(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_);
 
   program_manager_.m_filetype = nvh::ShaderFileManager::FILETYPE_GLSL;
   program_manager_.addDirectory("./assets/shaders/");
@@ -609,6 +611,12 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
       glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
                    GL_DYNAMIC_DRAW);
       object_ubo_size_ = object_datas.size() * data_stride;
+
+      if (command_list_supported_) {
+        glGetNamedBufferParameterui64vNV(object_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                        &object_ubo_address_);
+        glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
+      }
     }
     void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
     for (int i = 0; i < object_datas.size(); ++i) {
@@ -626,8 +634,12 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
       const RenderObject* object = real_render_objects[i];
       GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
       gl_context_.glUseProgram(program);
-      glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
-                        i * data_stride, sizeof(ObjectData));
+      // glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
+      //                   i * data_stride, sizeof(ObjectData));
+      // printf("ubo object address: %lld\n", object_ubo_address_ + i * data_stride);
+      glBufferAddressRangeNV(GL_UNIFORM_BUFFER_ADDRESS_NV, UBO_OBJECT,
+                             object_ubo_address_ + i * data_stride,
+                             sizeof(ObjectData));
       const_cast<RenderObject*>(object)->Render(shader_manager_);
     }
   }
