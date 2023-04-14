@@ -39,6 +39,13 @@ class RenderObject {
   void set_shader(const std::string& shader) { shader_ = shader; }
   const std::string& shader() const { return shader_; }
 
+  const MeshRenderer& mesh_renderer() const {
+    return mesh_renderer_;
+  }
+
+ protected:
+  MeshRenderer mesh_renderer_; 
+
  private:
   std::string shader_;
   glm::mat4 world_;
@@ -120,7 +127,6 @@ class LineObject : public RenderObject {
   const glm::vec4& color() const { return color_; }
 
  private:
-  MeshRenderer mesh_renderer_;
   LineStyle line_style_;
   glm::vec4 color_;
 };
@@ -161,7 +167,6 @@ class DashedStripeObject : public RenderObject {
   const glm::vec4& color() const { return color_; }
 
  private:
-  MeshRenderer mesh_renderer_;
   glm::vec4 color_;
 };
 
@@ -201,7 +206,6 @@ class SimpleTexturedObject : public RenderObject {
   float alpha() const { return alpha_; }
 
  private:
-  MeshRenderer mesh_renderer_;
   float alpha_;
 };
 

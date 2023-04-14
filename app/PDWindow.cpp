@@ -5,16 +5,16 @@
 #include <cstdio>
 #include <experimental/filesystem>
 #include <fstream>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
+#include "app/extension_command_list.h"
 #include "core/stb_image.h"
 
 namespace {
@@ -24,27 +24,6 @@ using ObjectData = common::ObjectData;
 using milli = std::chrono::milliseconds;
 namespace fs = std::experimental::filesystem;
 using namespace nvgl;
-
-std::set<std::string> extensions;
-constexpr int kUniformBufferOffsetAlignment = 256;
-int kMultiSampleCount = 8;
-
-int UniformBufferAlignedOffset(int size) {
-  return (size + kUniformBufferOffsetAlignment - 1) /
-         kUniformBufferOffsetAlignment * kUniformBufferOffsetAlignment;
-}
-
-// constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
-constexpr const char kMapDataFolder[] = "assets/dumped_map_data_compact";
-constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
-constexpr const char kExtensionARBBindlessTexture[] = "GL_ARB_bindless_texture";
-constexpr const char kExtensionNVShaderBufferLoad[] = "GL_NV_shader_buffer_load";
-
-const std::vector<std::string> kCommandListPrerequisiteExtensions = {
-    kExtensionNVCommandList,
-    kExtensionARBBindlessTexture,
-    kExtensionNVShaderBufferLoad,
-};
 
 class ProfileTimer {
  public:
@@ -63,6 +42,34 @@ class ProfileTimer {
   std::chrono::time_point<std::chrono::system_clock> start_;
 };
 
+std::set<std::string> extensions;
+constexpr int kUniformBufferOffsetAlignment = 256;
+int kMultiSampleCount = 8;
+
+int UniformBufferAlignedOffset(int size) {
+  return (size + kUniformBufferOffsetAlignment - 1) /
+         kUniformBufferOffsetAlignment * kUniformBufferOffsetAlignment;
+}
+
+template <typename Command>
+void PushCommandToBuffer(const Command& command, std::string* buffer) {
+  buffer->insert(buffer->end(), (const char*)(&command),
+                 (const char*)(&command) + sizeof(Command));
+}
+
+// constexpr const char kMapDataFolder[] = "assets/dumped_map_data";
+constexpr const char kMapDataFolder[] = "assets/dumped_map_data_compact";
+constexpr const char kExtensionNVCommandList[] = "GL_NV_command_list";
+constexpr const char kExtensionARBBindlessTexture[] = "GL_ARB_bindless_texture";
+constexpr const char kExtensionNVShaderBufferLoad[] =
+    "GL_NV_shader_buffer_load";
+
+const std::vector<std::string> kCommandListPrerequisiteExtensions = {
+    kExtensionNVCommandList,
+    kExtensionARBBindlessTexture,
+    kExtensionNVShaderBufferLoad,
+};
+
 void GetGLExtension() {
   int extension_num = 0;
   glGetIntegerv(GL_NUM_EXTENSIONS, &extension_num);
@@ -72,6 +79,22 @@ void GetGLExtension() {
     extensions.insert(extension);
     // printf("%s\n", extension.c_str());
   }
+}
+
+GLenum GetBaseDrawMode(GLenum draw_mode) {
+  switch (draw_mode) {
+    case GL_POINTS:
+      return GL_POINTS;
+    case GL_LINES:
+    case GL_LINE_STRIP:
+    case GL_LINE_LOOP:
+      return GL_LINES;
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+      return GL_TRIANGLES;
+  }
+  return draw_mode;
 }
 
 bool ExtensionSupport(const std::string& extension_name) {
@@ -131,6 +154,7 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
        fs::directory_iterator(fs::path(map_directory))) {
     files.push_back(directory_entry.path());
   }
+  files.resize(100);
 
   std::vector<std::unique_ptr<RenderObject>> objects(files.size());
   std::atomic_int slot_idx{0};
@@ -170,7 +194,6 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
 #endif
   return objects;
 }
-
 
 std::vector<glm::vec3> points;
 std::vector<float> times;
@@ -274,7 +297,7 @@ void PDWindow::onInitialize() {
 
   ImGui::StyleColorsDark();
   GetGLExtension();
-  
+
   int max_uniform_buffer_size = 0;
   glGetIntegerv(GL_UNIFORM_BUFFER_SIZE, &max_uniform_buffer_size);
   printf("max_uniform_buffer_size: %d\n", max_uniform_buffer_size);
@@ -285,7 +308,8 @@ void PDWindow::onInitialize() {
   printf("uniform_buffer_offset_alignment: %d\n",
          uniform_buffer_offset_alignment);
 
-  command_list_supported_ = ExtensionsSupport(kCommandListPrerequisiteExtensions);
+  command_list_supported_ =
+      ExtensionsSupport(kCommandListPrerequisiteExtensions);
 
   if (command_list_supported_) {
     InitializeCommandListResouce();
@@ -297,6 +321,11 @@ void PDWindow::onInitialize() {
   glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
   glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
+  if (command_list_supported_) {
+    glGetNamedBufferParameterui64vNV(scene_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                     &scene_ubo_address_);
+    glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
+  }
 
   glGenBuffers(1, &object_ubo_);
   glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
@@ -365,7 +394,6 @@ void PDWindow::onInitialize() {
 
 void PDWindow::onUpdate() {
   Window::onUpdate();
-  gl_context_.glUseProgram(-1);
   gl_context_.glUseProgram(0);
 
   // Process camera update
@@ -424,13 +452,15 @@ void PDWindow::onUpdate() {
   for (auto& k_v : shader_manager_.loaded_programs()) {
     gl_context_.glUseProgram(k_v.second);
     int VP_loc = glGetUniformLocation(k_v.second, "VP");
-    glUniformMatrix4fv(VP_loc, 1, GL_FALSE, glm::value_ptr(scene_data_.VP));
+    if (VP_loc != -1) {
+      glUniformMatrix4fv(VP_loc, 1, GL_FALSE, glm::value_ptr(scene_data_.VP));
+    }
     gl_context_.glUseProgram(0);
   }
 }
 
 void PDWindow::onRender() {
-  ProfileTimer timer("OnRender");
+  // ProfileTimer timer("OnRender");
   if (command_list_supported_) {
     BindFallbackFramebuffer();
   }
@@ -502,21 +532,23 @@ void PDWindow::DrawSceneBasic() {
     int M_loc = glGetUniformLocation(program, "M");
     int color_loc = glGetUniformLocation(program, "color");
     int alpha_loc = glGetUniformLocation(program, "in_alpha");
-    glUniformMatrix4fv(M_loc, 1, GL_FALSE,
-                       glm::value_ptr(render_object->world()));
+    if (M_loc != -1) {
+      glUniformMatrix4fv(M_loc, 1, GL_FALSE,
+                         glm::value_ptr(render_object->world()));
+    }
 
     auto line_object = dynamic_cast<LineObject*>(render_object);
-    if (line_object) {
+    if (line_object && color_loc != -1) {
       glUniform4fv(color_loc, 1, glm::value_ptr(line_object->color()));
     }
     auto dashed_stripe_object =
         dynamic_cast<DashedStripeObject*>(render_object);
-    if (dashed_stripe_object) {
+    if (dashed_stripe_object && color_loc != -1) {
       glUniform4fv(color_loc, 1, glm::value_ptr(dashed_stripe_object->color()));
     }
     auto simple_textured_object =
         dynamic_cast<SimpleTexturedObject*>(render_object);
-    if (simple_textured_object) {
+    if (simple_textured_object && alpha_loc != -1) {
       glUniform1f(alpha_loc, simple_textured_object->alpha());
     }
     return true;
@@ -604,7 +636,8 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
 void PDWindow::BindFallbackFramebuffer() {
   int real_sample_count = 0;
   glGetIntegerv(GL_SAMPLES, &real_sample_count);
-  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, (int*)&command_list_data_.original_framebuffer);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,
+                (int*)&command_list_data_.original_framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
   if (real_sample_count != kMultiSampleCount) {
     kMultiSampleCount = real_sample_count;
@@ -613,9 +646,12 @@ void PDWindow::BindFallbackFramebuffer() {
 }
 
 void PDWindow::BlitFallbackFramebuffer() {
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, command_list_data_.original_framebuffer);
-  glBlitFramebuffer(0 ,0 ,width, height, 0 ,0 ,width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                    command_list_data_.fallback_framebuffer);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
+                    command_list_data_.original_framebuffer);
+  glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                    GL_COLOR_BUFFER_BIT, GL_NEAREST);
 }
 
 void PDWindow::DrawSceneCommandToken() {
@@ -625,16 +661,14 @@ void PDWindow::DrawSceneCommandToken() {
 
   // Record draw commands
   std::vector<ObjectData> object_datas;
-  std::vector<GLuint> states;
-  std::vector<GLuint> fbos;
-  std::string token_buffer;
+  std::string& token_buffer = command_list_data_.command_stream_buffer_cpu_;
+  token_buffer.clear();
   NVTokenSequence& token_sequence = command_list_data_.token_sequence;
-  
-  std::vector<RenderObject*> real_render_objects;
 
+  std::vector<RenderObject*> real_render_objects;
   {
     // TODO: parallel collect data.
-    // ProfileTimer timer("collect uniform data");
+    // ProfileTimer timer("collect render datas");
     auto collect_data_pre_render_func =
         [&object_datas,
          &real_render_objects](RenderObject* render_object) -> bool {
@@ -670,29 +704,186 @@ void PDWindow::DrawSceneCommandToken() {
     }
   }
 
+  token_sequence.offsets.resize(object_datas.size());
+  token_sequence.sizes.resize(object_datas.size());
+  token_sequence.states.resize(object_datas.size());
+  token_sequence.fbos.resize(object_datas.size(),
+                             command_list_data_.fallback_framebuffer);
+
+  {
+    // ProfileTimer timer("create states");
+    glCreateStatesNV(token_sequence.states.size(),
+                     token_sequence.states.data());
+  }
+  // Setup token buffer
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
   {
-    // ProfileTimer timer("upload uniform data");
+    ProfileTimer timer("record draw commands");
     glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
     if (object_ubo_size_ < object_datas.size() * data_stride) {
       glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
                    GL_DYNAMIC_DRAW);
       object_ubo_size_ = object_datas.size() * data_stride;
+      glGetNamedBufferParameterui64vNV(object_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                       &object_ubo_address_);
+      glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
     }
+
     void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+
+    // Build token buffer
     for (int i = 0; i < object_datas.size(); ++i) {
       memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
-    }
 
+      // Setup state
+      const RenderObject* object = real_render_objects[i];
+      GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
+      gl_context_.glUseProgram(program);
+      auto line_object = dynamic_cast<const LineObject*>(object);
+      if (line_object) {
+        glEnable(GL_LINE_STIPPLE);
+        glLineStipple(line_object->line_style().line_stipple_factor,
+                      line_object->line_style().line_stipple_pattern);
+      }
+
+      object->mesh_renderer().SetupVertexAttribFormat();
+
+      // Capture state
+      glStateCaptureNV(
+          token_sequence.states[i],
+          GetBaseDrawMode(object->mesh_renderer().mesh().draw_mode()));
+      // Restore state
+      if (line_object) {
+        glDisable(GL_LINE_STIPPLE);
+      }
+      // record draw command
+
+      GLintptr offset = token_buffer.size();
+
+      // Set up uniform binding info
+      {
+        uint header = glGetCommandHeaderNV(GL_UNIFORM_ADDRESS_COMMAND_NV,
+                                           sizeof(UniformAddressCommandNV));
+        uint64_t uniform_buffer_address = object_ubo_address_ + i * data_stride;
+        PushCommandToBuffer(
+            UniformAddressCommandNV{header, UBO_OBJECT,
+                                    glGetStageIndexNV(GL_VERTEX_SHADER),
+                                    uniform_buffer_address},
+            &token_buffer);
+        PushCommandToBuffer(
+            UniformAddressCommandNV{header, UBO_OBJECT,
+                                    glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                                    uniform_buffer_address},
+            &token_buffer);
+        PushCommandToBuffer(
+            UniformAddressCommandNV{header, UBO_SCENE,
+                                    glGetStageIndexNV(GL_VERTEX_SHADER),
+                                    scene_ubo_address_},
+            &token_buffer);
+        PushCommandToBuffer(
+            UniformAddressCommandNV{header, UBO_SCENE,
+                                    glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                                    scene_ubo_address_},
+            &token_buffer);
+      }
+
+      // Set up vertex attrib binding info
+      {
+        uint header = glGetCommandHeaderNV(GL_ATTRIBUTE_ADDRESS_COMMAND_NV,
+                                           sizeof(AttributeAddressCommandNV));
+        PushCommandToBuffer(
+            AttributeAddressCommandNV{header, 0,
+                                      object->mesh_renderer().vbo_address()},
+            &token_buffer);
+      }
+      // Set up index binding info
+      if (object->mesh_renderer().mesh().indexed_draw()) {
+        uint header = glGetCommandHeaderNV(GL_ELEMENT_ADDRESS_COMMAND_NV,
+                                           sizeof(ElementAddressCommandNV));
+        PushCommandToBuffer(
+            ElementAddressCommandNV{header,
+                                    object->mesh_renderer().ibo_address(),
+                                    sizeof(Mesh::IndexType)},
+            &token_buffer);
+      }
+
+      // Set up aux info
+      if (line_object) {
+        uint header = glGetCommandHeaderNV(GL_LINE_WIDTH_COMMAND_NV,
+                                           sizeof(LineWidthCommandNV));
+        PushCommandToBuffer(
+            LineWidthCommandNV{header, line_object->line_style().line_width},
+            &token_buffer);
+      }
+
+      // Set up draw command
+      if (object->mesh_renderer().mesh().indexed_draw()) {
+        uint header =
+            glGetCommandHeaderNV(GL_DRAW_ELEMENTS_INSTANCED_COMMAND_NV,
+                                 sizeof(DrawElementsInstancedCommandNV));
+        PushCommandToBuffer(
+            DrawElementsInstancedCommandNV{
+                header, object->mesh_renderer().mesh().draw_mode(),
+                (unsigned int)object->mesh_renderer().mesh().indices().size(),
+                1, 0, 0, 0},
+            &token_buffer);
+      } else {
+        uint header =
+            glGetCommandHeaderNV(GL_DRAW_ARRAYS_INSTANCED_COMMAND_NV,
+                                 sizeof(DrawArraysInstancedCommandNV));
+        PushCommandToBuffer(
+            DrawArraysInstancedCommandNV{
+                header, object->mesh_renderer().mesh().draw_mode(),
+                (unsigned int)object->mesh_renderer().mesh().positions().size(),
+                1, 0, 0},
+            &token_buffer);
+      }
+
+      int size = token_buffer.size() - offset;
+      token_sequence.offsets[i] = offset;
+      token_sequence.sizes[i] = size;
+    }
     glUnmapBuffer(GL_UNIFORM_BUFFER);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    // Transfer data to buffer
+    if (command_list_data_.command_stream_buffer_size < token_buffer.size()) {
+      glNamedBufferData(command_list_data_.command_stream_buffer,
+                        token_buffer.size(), token_buffer.c_str(),
+                        GL_DYNAMIC_DRAW);
+      command_list_data_.command_stream_buffer_size = token_buffer.size();
+    } else {
+      glNamedBufferSubData(command_list_data_.command_stream_buffer, 0,
+                           token_buffer.size(), token_buffer.c_str());
+    }
   }
 
-  // Play draw commands
+  {
+    // ProfileTimer timer("Play draw commands");
 
+    // Play draw commands
+    // glDrawCommandsStatesNV(command_list_data_.command_stream_buffer,
+    //                       command_list_data_.token_sequence.offsets.data(),
+    //                       command_list_data_.token_sequence.sizes.data(),
+    //                       command_list_data_.token_sequence.states.data(),
+    //                       command_list_data_.token_sequence.fbos.data(),
+    //                       command_list_data_.token_sequence.offsets.size());
+
+    glDrawCommandsNV(GL_LINES, command_list_data_.command_stream_buffer,
+                     command_list_data_.token_sequence.offsets.data(),
+                     command_list_data_.token_sequence.sizes.data(),
+                     command_list_data_.token_sequence.offsets.size());
+    glDrawCommandsNV(GL_TRIANGLES, command_list_data_.command_stream_buffer,
+                     command_list_data_.token_sequence.offsets.data(),
+                     command_list_data_.token_sequence.sizes.data(),
+                     command_list_data_.token_sequence.offsets.size());
+  }
   // Delete all states
-  glDeleteStatesNV(states.size(), states.data());
-
+  {
+    // ProfileTimer timer("delete states");
+    glDeleteStatesNV(token_sequence.states.size(),
+                     token_sequence.states.data());
+  }
 }
 
 void PDWindow::DrawSceneCommandList() {
@@ -703,12 +894,12 @@ void PDWindow::DrawSceneCommandList() {
 
 void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
   if (command_list_data_.color_texture) {
-    glDeleteTextures(1, &command_list_data_.color_texture);
-    glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
-
     glMakeTextureHandleNonResidentARB(command_list_data_.color_texture_handle);
     glMakeTextureHandleNonResidentARB(
         command_list_data_.depth_stencil_texture_handle);
+
+    glDeleteTextures(1, &command_list_data_.color_texture);
+    glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
   }
   glGenTextures(1, &command_list_data_.color_texture);
   glGenTextures(1, &command_list_data_.depth_stencil_texture);
@@ -739,14 +930,15 @@ void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
       glGetTextureHandleARB(command_list_data_.color_texture);
   command_list_data_.depth_stencil_texture_handle =
       glGetTextureHandleARB(command_list_data_.depth_stencil_texture);
-  printf("color_texture_handle:%x  depth_stencil_texture_handle:%x\n", command_list_data_.color_texture_handle,
-  command_list_data_.depth_stencil_texture_handle);
   glMakeTextureHandleResidentARB(command_list_data_.color_texture_handle);
   glMakeTextureHandleResidentARB(
       command_list_data_.depth_stencil_texture_handle);
 }
 
 void PDWindow::InitializeCommandListResouce() {
+  glGenBuffers(1, &command_list_data_.command_stream_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, command_list_data_.command_stream_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
   glGenFramebuffers(1, &command_list_data_.fallback_framebuffer);
 
   ResizeCommandListRenderbuffers(width, height);

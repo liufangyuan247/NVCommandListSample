@@ -10,11 +10,8 @@
 
 #if defined(GL_core_profile) || defined(GL_compatibility_profile) || defined(GL_es_profile)
 
-#extension GL_ARB_bindless_texture : require
+// #extension GL_ARB_bindless_texture : require
 #extension GL_NV_command_list : enable
-#if GL_NV_command_list
-layout(commandBindableNV) uniform;
-#endif
 
 #endif
 
@@ -38,6 +35,10 @@ struct ObjectData {
 #endif
 
 #if defined(GL_core_profile) || defined(GL_compatibility_profile) || defined(GL_es_profile)
+
+#if GL_NV_command_list
+layout(commandBindableNV) uniform;
+#endif
 
 layout(std140,binding=UBO_SCENE) uniform sceneBuffer {
   SceneData   scene;

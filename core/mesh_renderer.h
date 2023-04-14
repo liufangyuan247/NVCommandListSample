@@ -90,7 +90,7 @@ class MeshRenderer {
     }
   }
 
-  int SetupVertexAttribFormat() {
+  int SetupVertexAttribFormat() const {
     int offset = 0;
     glEnableVertexAttribArray(POSITION);
     glVertexAttribFormat(POSITION, Mesh::PositionType::length(), GL_FLOAT,
@@ -114,6 +114,14 @@ class MeshRenderer {
     glBindVertexBuffer(0, 0, 0, offset);
     glVertexBindingDivisor(0, 0);
     return offset;
+  }
+
+  GLuint64 vbo_address() const {
+    return vbo_address_;
+  }
+
+  GLuint64 ibo_address() const {
+    return ibo_address_;
   }
 
  private:

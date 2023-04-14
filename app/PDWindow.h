@@ -45,8 +45,10 @@ class PDWindow : public Window {
 
   common::SceneData scene_data_;
   GLuint scene_ubo_;
+  GLuint64 scene_ubo_address_;
 
   GLuint object_ubo_;
+  GLuint64 object_ubo_address_;
   int object_ubo_size_= 0;
 
   enum DrawMethod {
@@ -71,6 +73,8 @@ class PDWindow : public Window {
 
     GLuint color_texture = 0;
     GLuint64 color_texture_handle = 0;
+    int fbo_width;
+    int fbo_height;
 
     GLuint depth_stencil_texture = 0;
     GLuint64 depth_stencil_texture_handle = 0;
@@ -78,6 +82,8 @@ class PDWindow : public Window {
     std::vector<GLuint> all_states;
 
     GLuint command_stream_buffer = 0;
+    uint64_t command_stream_buffer_size = 0;
+    std::string command_stream_buffer_cpu_;
     NVTokenSequence token_sequence;
     NVTokenSequence token_sequence_address;
   } command_list_data_;

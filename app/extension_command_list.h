@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 
+#include <GL/glew.h>
+
 #pragma pack(push, 1)
 
 typedef struct {
@@ -46,24 +48,21 @@ typedef struct {
 
 typedef struct {
   uint header;
-  uint addressLo;
-  uint addressHi;
+  uint64_t address;
   uint typeSizeInByte;
 } ElementAddressCommandNV;
 
 typedef struct {
   uint header;
   uint index;
-  uint addressLo;
-  uint addressHi;
+  uint64_t address;
 } AttributeAddressCommandNV;
 
 typedef struct {
   uint header;
   ushort index;
   ushort stage;
-  uint addressLo;
-  uint addressHi;
+  uint64_t address;
 } UniformAddressCommandNV;
 
 typedef struct {

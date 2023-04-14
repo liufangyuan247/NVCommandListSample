@@ -2,6 +2,49 @@
 
 std::map<GLFWwindow *, Window*> Window::allWindows;
 
+namespace {
+
+const std::map<GLenum, const char*> kSourceName {
+	{GL_DEBUG_SOURCE_API, "GL_DEBUG_SOURCE_API"},
+	{GL_DEBUG_SOURCE_WINDOW_SYSTEM, "GL_DEBUG_SOURCE_WINDOW_SYSTEM"},
+	{GL_DEBUG_SOURCE_SHADER_COMPILER, "GL_DEBUG_SOURCE_SHADER_COMPILER"},
+	{GL_DEBUG_SOURCE_THIRD_PARTY, "GL_DEBUG_SOURCE_THIRD_PARTY"},
+	{GL_DEBUG_SOURCE_APPLICATION, "GL_DEBUG_SOURCE_APPLICATION"},
+	{GL_DEBUG_SOURCE_OTHER, "GL_DEBUG_SOURCE_OTHER"},
+};
+
+const std::map<GLenum, const char*> kTypeName {
+	{GL_DEBUG_TYPE_ERROR, "GL_DEBUG_TYPE_ERROR"},
+	{GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR, "GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR"},
+	{GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR, "GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR"},
+	{GL_DEBUG_TYPE_PORTABILITY, "GL_DEBUG_TYPE_PORTABILITY"},
+	{GL_DEBUG_TYPE_PERFORMANCE, "GL_DEBUG_TYPE_PERFORMANCE"},
+	{GL_DEBUG_TYPE_MARKER, "GL_DEBUG_TYPE_MARKER"},
+	{GL_DEBUG_TYPE_PUSH_GROUP, "GL_DEBUG_TYPE_PUSH_GROUP"},
+	{GL_DEBUG_TYPE_POP_GROUP, "GL_DEBUG_TYPE_POP_GROUP"},
+	{GL_DEBUG_TYPE_OTHER, "GL_DEBUG_TYPE_OTHER"},
+};
+
+const std::map<GLenum, const char*> kSeverityName {
+	{GL_DEBUG_SEVERITY_HIGH, "GL_DEBUG_SEVERITY_HIGH"},
+	{GL_DEBUG_SEVERITY_MEDIUM, "GL_DEBUG_SEVERITY_MEDIUM"},
+	{GL_DEBUG_SEVERITY_LOW, "GL_DEBUG_SEVERITY_LOW"},
+	{GL_DEBUG_SEVERITY_NOTIFICATION, "GL_DEBUG_SEVERITY_NOTIFICATION"},
+};
+
+void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
+                                GLenum severity, GLsizei length,
+                                const GLchar* message, const void* userParam) {
+	if (type != GL_DEBUG_TYPE_ERROR) {
+		return;
+	}
+  // (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,
+  fprintf(stderr,
+          "GL CALLBACK:source = %s type = %s, severity = %s, message = %s\n",
+          kSourceName.at(source), kTypeName.at(type),
+          kSeverityName.at(severity), message);
+}
+}  // namespace
 
 void Window::onKeyPressed(GLFWwindow * window, int key, int scancode, int action, int mod)
 {
@@ -67,6 +110,7 @@ Window::Window(const char* caption)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
 	glfwWindowHint(GLFW_SAMPLES, 1);
 
 	window = glfwCreateWindow(width, height, caption, 0, 0);
@@ -75,6 +119,9 @@ Window::Window(const char* caption)
 
 	glewExperimental=true;
 	glewInit();
+
+	// glEnable(GL_DEBUG_OUTPUT);
+	glDebugMessageCallback(MessageCallback, 0);
 
 	allWindows[window] = this;
 	glfwSetKeyCallback(window, onKeyPressed);
