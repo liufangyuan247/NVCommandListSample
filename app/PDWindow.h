@@ -46,6 +46,12 @@ class PDWindow : public Window {
   struct CapturedStateCache;
   GLuint CaptureState(const CapturedStateCache& state_cache);
 
+  void CompileDrawCommandList();
+  void CollectRenderObjectData(
+      std::vector<common::ObjectData>& object_datas,
+      std::vector<RenderObject*>& real_render_objects,
+      std::vector<CapturedStateCache>& render_object_states);
+
   common::SceneData scene_data_;
   GLuint scene_ubo_;
   GLuint64 scene_ubo_address_;
@@ -113,6 +119,8 @@ class PDWindow : public Window {
     std::string command_stream_buffer_cpu_;
     NVTokenSequence token_sequence;
     NVTokenSequence token_sequence_address;
+
+    GLuint command_list_;
   } command_list_data_;
 
   bool command_list_supported_ = false;
