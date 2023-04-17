@@ -10,6 +10,9 @@
 #include "app/json.hpp"
 
 #ifdef _WIN32
+
+#include <Windows.h>
+
 #ifndef _DEBUG
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 #else
