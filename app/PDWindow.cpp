@@ -300,6 +300,18 @@ void ComputeCameraPosition(const float time,
   front = glm::normalize(dir);
 }
 
+void PrintOpenGLCapablities() {
+  GLint uboSize = 0;
+  glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &uboSize);
+  printf("max uniform block size: %d\n", uboSize);
+
+  int uniform_buffer_offset_alignment = 0;
+  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
+                &uniform_buffer_offset_alignment);
+  printf("uniform_buffer_offset_alignment: %d\n",
+         uniform_buffer_offset_alignment);
+}
+
 }  // namespace
 
 PDWindow::~PDWindow() {
@@ -323,11 +335,7 @@ void PDWindow::onInitialize() {
   ImGui::StyleColorsDark();
   GetGLExtension();
 
-  int uniform_buffer_offset_alignment = 0;
-  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
-                &uniform_buffer_offset_alignment);
-  printf("uniform_buffer_offset_alignment: %d\n",
-         uniform_buffer_offset_alignment);
+  PrintOpenGLCapablities();  
 
   command_list_supported_ =
       ExtensionsSupport(kCommandListPrerequisiteExtensions);
@@ -633,7 +641,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
       object_ubo_size_ = object_datas.size() * data_stride;
       object_ubo_address_ = 0;
     }
-    void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    unsigned char* ptr = (unsigned char*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
     for (int i = 0; i < object_datas.size(); ++i) {
       memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
     }
@@ -689,19 +697,28 @@ void PDWindow::DrawSceneCommandToken() {
     NVTokenSequence& token_sequence = command_list_data_.token_sequence;
 
     std::vector<RenderObject*> real_render_objects;
+    std::vector<CapturedStateCache> render_object_states;
     {
       // TODO: parallel collect data.
       ProfileTimer timer("  collect render datas");
       auto collect_data_pre_render_func =
-          [&object_datas,
-           &real_render_objects](RenderObject* render_object) -> bool {
+          [&object_datas, &real_render_objects, &render_object_states,
+           &shader_manager_ =
+               shader_manager_](RenderObject* render_object) -> bool {
         bool should_continue = true;
         ObjectData object_data;
+        CapturedStateCache render_state;
+        render_state.program =
+              shader_manager_.GetShader(render_object->shader() + "_uniform");
+        render_state.vertex_attrib_mask = render_object->mesh_renderer().vertex_attrib_mask();
+        render_state.base_draw_mode = GetBaseDrawMode(render_object->mesh_renderer().mesh().draw_mode());
+
         object_data.M = render_object->world();
         auto line_object = dynamic_cast<const LineObject*>(render_object);
         if (line_object) {
           object_data.color = line_object->color();
           should_continue = false;
+          render_state.enable_line_stipple = (uint8_t)line_object->line_style().line_stipple;
         }
         auto dashed_stripe_object =
             dynamic_cast<const DashedStripeObject*>(render_object);
@@ -715,9 +732,11 @@ void PDWindow::DrawSceneCommandToken() {
           object_data.color = glm::vec4(simple_textured_object->alpha());
           should_continue = false;
         }
+
         if (!should_continue) {
           object_datas.push_back(object_data);
           real_render_objects.push_back(render_object);
+          render_object_states.push_back(render_state);
         }
         return should_continue;
       };
@@ -727,17 +746,14 @@ void PDWindow::DrawSceneCommandToken() {
       }
     }
 
+    ProfileTimer timer("  record render commands");
+
     token_sequence.offsets.resize(object_datas.size());
     token_sequence.sizes.resize(object_datas.size());
     token_sequence.states.resize(object_datas.size());
     token_sequence.fbos.resize(object_datas.size(),
                                command_list_data_.fallback_framebuffer);
 
-    {
-      ProfileTimer timer("  create states");
-      glCreateStatesNV(token_sequence.states.size(),
-                       token_sequence.states.data());
-    }
     // Setup token buffer
     int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
     {
@@ -754,39 +770,16 @@ void PDWindow::DrawSceneCommandToken() {
         glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
       }
 
-      void* ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+      unsigned char* ptr = (unsigned char*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
 
       // Build token buffer
       for (int i = 0; i < object_datas.size(); ++i) {
+        token_sequence.states[i] = CaptureState(render_object_states[i]);
+
         memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
 
-        // Setup state
         const RenderObject* object = real_render_objects[i];
         auto line_object = dynamic_cast<const LineObject*>(object);
-        {
-          GLuint program =
-              shader_manager_.GetShader(object->shader() + "_uniform");
-          gl_context_.glUseProgram(program);
-          if (line_object && line_object->line_style().line_stipple) {
-            glEnable(GL_LINE_STIPPLE);
-            glLineStipple(line_object->line_style().line_stipple_factor,
-                          line_object->line_style().line_stipple_pattern);
-          }
-
-          // TODO: 为什么这个打开会崩溃？
-          object->mesh_renderer().SetupVertexAttribFormat();
-
-          // Capture state
-          {
-            glStateCaptureNV(
-                token_sequence.states[i],
-                GetBaseDrawMode(object->mesh_renderer().mesh().draw_mode()));
-          }
-          // Restore state
-          if (line_object && line_object->line_style().line_stipple) {
-            glDisable(GL_LINE_STIPPLE);
-          }
-        }
 
         // record draw command
         GLintptr offset = token_buffer.size();
@@ -893,6 +886,8 @@ void PDWindow::DrawSceneCommandToken() {
       }
     }
     command_list_data_.draw_commands_compiled = true;
+
+    printf("total captured states: %d\n", state_caches_.size());
   }
 
   {
@@ -921,12 +916,6 @@ void PDWindow::DrawSceneCommandToken() {
           command_list_data_.token_sequence.fbos.data() + start,
           end - start + 1);
     }
-  }
-  // Delete all states
-  {
-    // ProfileTimer timer("delete states");
-    // glDeleteStatesNV(command_list_data_.token_sequence.states.size(),
-    //                  command_list_data_.token_sequence.states.data());
   }
 }
 
@@ -993,9 +982,45 @@ void PDWindow::FinalizeCommandListResouce() {
   glDeleteTextures(1, &command_list_data_.color_texture);
   glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
 
+  std::vector<GLuint> all_cached_states;
+  std::transform(state_caches_.begin(), state_caches_.end(),
+                std::back_inserter(all_cached_states),
+                [](const CaptureStateData& capture_state) {
+                  return capture_state.state_object;
+                });
+
+  glDeleteStatesNV(all_cached_states.size(), all_cached_states.data());
+
   glMakeTextureHandleNonResidentARB(command_list_data_.color_texture_handle);
   glMakeTextureHandleNonResidentARB(
       command_list_data_.depth_stencil_texture_handle);
+}
+
+GLuint PDWindow::CaptureState(const CapturedStateCache& state_cache) {
+  auto iter = std::find_if(state_caches_.begin(), state_caches_.end(),
+                           [&state_cache](const CaptureStateData& capture_state) {
+                             return capture_state.state_cached == state_cache;
+                           });
+  if (iter != state_caches_.end()) {
+    return iter->state_object;
+  }
+  GLuint state_object;
+  glCreateStatesNV(1, &state_object);
+  state_cache.ApplyState();
+  glStateCaptureNV(state_object, state_cache.base_draw_mode);
+  state_caches_.push_back(CaptureStateData{state_cache, state_object});
+  return state_object;
+}
+
+void PDWindow::CapturedStateCache::ApplyState() const {
+  glUseProgram(program);
+  if (enable_line_stipple) {
+    glEnable(GL_LINE_STIPPLE);
+  } else {
+    glDisable(GL_LINE_STIPPLE);
+  }
+
+  MeshRenderer::SetupVertexAttribFormat(vertex_attrib_mask);
 }
 
 #undef min

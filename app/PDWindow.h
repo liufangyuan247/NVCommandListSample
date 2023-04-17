@@ -43,6 +43,9 @@ class PDWindow : public Window {
   void BindFallbackFramebuffer();
   void BlitFallbackFramebuffer();
 
+  struct CapturedStateCache;
+  GLuint CaptureState(const CapturedStateCache& state_cache);
+
   common::SceneData scene_data_;
   GLuint scene_ubo_;
   GLuint64 scene_ubo_address_;
@@ -64,6 +67,31 @@ class PDWindow : public Window {
     std::vector<GLsizei> sizes;
     std::vector<GLuint> states;
     std::vector<GLuint> fbos;
+  };
+
+#pragma pack(push, 1)
+  struct CapturedStateCache {
+    GLenum base_draw_mode = 0;
+    GLuint program = 0;
+    uint8_t enable_line_stipple = 0;
+    uint16_t vertex_attrib_mask = 0;
+
+    bool operator==(const CapturedStateCache& other) const {
+      // bit wise compare
+      return memcmp(this, &other, sizeof(CapturedStateCache)) == 0;
+    }
+    bool operator!=(const CapturedStateCache& other) const {
+      return !(*this == other);
+    }
+
+    void ApplyState() const;
+  };
+
+#pragma pack(pop)
+
+  struct CaptureStateData {
+    CapturedStateCache state_cached;
+    GLuint state_object;
   };
 
   struct CommandListExtensionData {
@@ -96,6 +124,8 @@ class PDWindow : public Window {
 
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
+
+  std::vector<CaptureStateData> state_caches_;
 
   Camera camera_;
   ShaderManager shader_manager_;

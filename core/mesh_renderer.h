@@ -44,7 +44,7 @@ class MeshRenderer {
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, total_size, 0, GL_STATIC_DRAW);
 
-    void* buffer = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    unsigned char* buffer = (unsigned char*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
     for (int i = 0; i < vertex_count; ++i) {
       memcpy(buffer, &mesh_.positions()[i], sizeof(Mesh::PositionType));
       buffer += sizeof(Mesh::PositionType);
@@ -93,20 +93,27 @@ class MeshRenderer {
   }
 
   int SetupVertexAttribFormat() const {
+    return SetupVertexAttribFormat(vertex_attrib_mask());
+  }
+
+  static int SetupVertexAttribFormat(uint16_t vertex_attrib_mask) {
     int offset = 0;
-    glEnableVertexAttribArray(POSITION);
-    glVertexAttribFormat(POSITION, Mesh::PositionType::length(), GL_FLOAT,
-                         GL_FALSE, offset);
-    glVertexAttribBinding(POSITION, 0);
-    offset += sizeof(Mesh::PositionType);
-    if (mesh_.colors().size()) {
+    if (vertex_attrib_mask & (1 << POSITION)) {
+      glEnableVertexAttribArray(POSITION);
+      glVertexAttribFormat(POSITION, Mesh::PositionType::length(), GL_FLOAT,
+                          GL_FALSE, offset);
+      glVertexAttribBinding(POSITION, 0);
+      offset += sizeof(Mesh::PositionType);
+    }
+
+    if (vertex_attrib_mask & (1 << COLOR)) {
       glEnableVertexAttribArray(COLOR);
       glVertexAttribFormat(COLOR, Mesh::ColorType::length(), GL_UNSIGNED_BYTE,
                            GL_TRUE, offset);
       glVertexAttribBinding(COLOR, 0);
       offset += sizeof(Mesh::ColorType);
     }
-    if (mesh_.uvs().size()) {
+    if (vertex_attrib_mask & (1 << UV)) {
       glEnableVertexAttribArray(UV);
       glVertexAttribFormat(UV, Mesh::ColorType::length(), GL_FLOAT, GL_FALSE,
                            offset);
@@ -116,6 +123,20 @@ class MeshRenderer {
     glBindVertexBuffer(0, 0, 0, offset);
     glVertexBindingDivisor(0, 0);
     return offset;
+  }
+
+  uint16_t vertex_attrib_mask() const {
+    uint16_t mask = 0;
+    if (mesh_.positions().size()) {
+      mask |= 1 << POSITION;
+    }
+    if (mesh_.colors().size()) {
+      mask |= 1 << COLOR;
+    }
+    if (mesh_.uvs().size()) {
+      mask |= 1 << UV;
+    }
+    return mask;
   }
 
   GLuint64 vbo_address() const {
