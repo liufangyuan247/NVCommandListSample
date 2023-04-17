@@ -14,7 +14,7 @@ class OpenGLContext final {
   OpenGLContext(const OpenGLContext&) = delete;
   OpenGLContext& operator=(const OpenGLContext&) = delete;
 
-  bool set_cache_state(bool cache_state) {
+  void set_cache_state(bool cache_state) {
     cache_state_ = cache_state;
   }
 

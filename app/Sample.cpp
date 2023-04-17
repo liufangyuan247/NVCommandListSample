@@ -71,7 +71,7 @@ class ProfileTimer {
 
  private:
   std::string entry_name_;
-  std::chrono::time_point<std::chrono::system_clock> start_;
+  std::chrono::time_point<std::chrono::steady_clock> start_;
   ProfileTimerGroup* group_ = nullptr;
 };
 

@@ -6,6 +6,9 @@
 
 #pragma pack(push, 1)
 
+using uint = unsigned int;
+using ushort = unsigned short;
+
 typedef struct {
   uint header;
 } TerminateSequenceCommandNV;
