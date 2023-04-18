@@ -38,7 +38,7 @@ void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
 	if (type != GL_DEBUG_TYPE_ERROR) {
 		return;
 	}
-  // (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,
+
   fprintf(stderr,
           "GL CALLBACK:source = %s type = %s, severity = %s, message = %s\n",
           kSourceName.at(source), kTypeName.at(type),

@@ -122,6 +122,11 @@ class CommandListSample : public Window {
     GLuint depth_stencil_texture = 0;
     GLuint64 depth_stencil_texture_handle = 0;
 
+    GLuint mesh_vbo_ = 0;
+    GLuint mesh_ibo_ = 0;
+    GLuint64 mesh_vbo_address_ = 0;
+    GLuint64 mesh_ibo_address_ = 0;
+
     bool draw_commands_compiled = false;
     GLuint command_stream_buffer = 0;
     uint64_t command_stream_buffer_size = 0;

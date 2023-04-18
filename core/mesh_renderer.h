@@ -46,19 +46,12 @@ class MeshRenderer {
     SetupVertexAttribFormat();
     glBindVertexBuffer(0, vbo_, 0, VertexAttribStride());
 
-    glGetNamedBufferParameterui64vNV(vbo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                     &vbo_address_);
-    glMakeNamedBufferResidentNV(vbo_, GL_READ_ONLY);
-
     if (mesh_.indexed_draw()) {
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                    sizeof(Mesh::IndexType) * mesh_.indices().size(),
                    mesh_.indices().data(), GL_STATIC_DRAW);
 
-      glGetNamedBufferParameterui64vNV(ibo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                       &ibo_address_);
-      glMakeNamedBufferResidentNV(ibo_, GL_READ_ONLY);
     }
 
     glBindVertexArray(0);
@@ -132,6 +125,15 @@ class MeshRenderer {
     return VertexAttribStride() * mesh_.positions().size();
   }
 
+  uint64_t VertexElementSize() const {
+    return sizeof(Mesh::IndexType) * mesh_.indices().size();
+  }
+
+  void FillVertexElementBuffer(void* buffer) const {
+    unsigned char* buffer_ptr = (unsigned char*)buffer;
+    memcpy(buffer_ptr, mesh_.indices().data(), VertexElementSize());
+  }
+
   void FillVertexBufferInterleaved(void* buffer) const {
     int16_t vam = vertex_attrib_mask();
     int vertex_count = mesh_.positions().size();
@@ -166,15 +168,9 @@ class MeshRenderer {
     return mask;
   }
 
-  GLuint64 vbo_address() const { return vbo_address_; }
-
-  GLuint64 ibo_address() const { return ibo_address_; }
-
  private:
   GLuint vao_ = 0;
   GLuint vbo_ = 0;
   GLuint ibo_ = 0;
-  GLuint64 vbo_address_ = 0;
-  GLuint64 ibo_address_ = 0;
   Mesh mesh_;
 };

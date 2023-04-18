@@ -819,6 +819,63 @@ void CommandListSample::CompileDrawCommandList() {
   CollectRenderObjectData(object_datas, real_render_objects,
                           render_object_states);
 
+  // Caculate vbo ibo size
+  int64_t vbo_size = 0;
+  int64_t ibo_size = 0;
+
+  for (auto& object : real_render_objects) {
+    const MeshRenderer& mesh_render = object->mesh_renderer();
+    vbo_size += mesh_render.VertexAttribSize();
+    ibo_size += mesh_render.VertexElementSize();
+  }
+
+  // Generate vertex buffer
+  glCreateBuffers(1, &command_list_data_.mesh_vbo_);
+  glNamedBufferData(command_list_data_.mesh_vbo_, vbo_size, 0, GL_STATIC_DRAW);
+
+  if (ibo_size > 0) {
+    glCreateBuffers(1, &command_list_data_.mesh_ibo_);
+    glNamedBufferData(command_list_data_.mesh_ibo_, ibo_size, 0,
+                      GL_STATIC_DRAW);
+  }
+
+  unsigned char* vbo_data = (unsigned char*)glMapNamedBufferRange(
+      command_list_data_.mesh_vbo_, 0, vbo_size, GL_MAP_WRITE_BIT);
+  unsigned char* ibo_data = nullptr;
+  if (ibo_size > 0) {
+    ibo_data = (unsigned char*)glMapNamedBufferRange(
+        command_list_data_.mesh_ibo_, 0, ibo_size, GL_MAP_WRITE_BIT);
+  }
+
+  for (auto& object : real_render_objects) {
+    const MeshRenderer& mesh_render = object->mesh_renderer();
+    int64_t object_vbo_size = mesh_render.VertexAttribSize();
+    int64_t object_ibo_size = mesh_render.VertexElementSize();
+
+    mesh_render.FillVertexBufferInterleaved(vbo_data);
+    vbo_data += object_vbo_size;
+    if (ibo_data) {
+      mesh_render.FillVertexElementBuffer(ibo_data);
+      ibo_data += object_ibo_size;
+    }
+  }
+
+  if (ibo_data) {
+    glUnmapNamedBuffer(command_list_data_.mesh_ibo_);
+  }
+  glUnmapNamedBuffer(command_list_data_.mesh_vbo_);
+
+  glGetNamedBufferParameterui64vNV(command_list_data_.mesh_vbo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                   &command_list_data_.mesh_vbo_address_);
+  glMakeNamedBufferResidentNV(command_list_data_.mesh_vbo_, GL_READ_ONLY);
+
+  if (ibo_size > 0) {
+    glGetNamedBufferParameterui64vNV(command_list_data_.mesh_ibo_,
+                                     GL_BUFFER_GPU_ADDRESS_NV,
+                                     &command_list_data_.mesh_ibo_address_);
+    glMakeNamedBufferResidentNV(command_list_data_.mesh_ibo_, GL_READ_ONLY);
+  }
+
   ProfileTimer timer("  record render commands");
 
   token_sequence.offsets.clear();
@@ -855,6 +912,9 @@ void CommandListSample::CompileDrawCommandList() {
     GLintptr last_offset = -1;
 
     // Build token buffer
+    GLuint64 vbo_address = command_list_data_.mesh_vbo_address_;
+    GLuint64 ibo_address = command_list_data_.mesh_ibo_address_;
+
     for (int i = 0; i < object_datas.size(); ++i) {
       GLuint state = CaptureState(render_object_states[i]);
 
@@ -925,19 +985,16 @@ void CommandListSample::CompileDrawCommandList() {
         uint header = glGetCommandHeaderNV(GL_ATTRIBUTE_ADDRESS_COMMAND_NV,
                                            sizeof(AttributeAddressCommandNV));
         PushCommandToBuffer(
-            AttributeAddressCommandNV{header, 0,
-                                      object->mesh_renderer().vbo_address()},
+            AttributeAddressCommandNV{header, 0, vbo_address},
             &token_buffer);
       }
       // Set up index binding info
       if (object->mesh_renderer().mesh().indexed_draw()) {
         uint header = glGetCommandHeaderNV(GL_ELEMENT_ADDRESS_COMMAND_NV,
                                            sizeof(ElementAddressCommandNV));
-        PushCommandToBuffer(
-            ElementAddressCommandNV{header,
-                                    object->mesh_renderer().ibo_address(),
-                                    sizeof(Mesh::IndexType)},
-            &token_buffer);
+        PushCommandToBuffer(ElementAddressCommandNV{header, ibo_address,
+                                                    sizeof(Mesh::IndexType)},
+                            &token_buffer);
       }
 
       // Set up aux info
@@ -972,6 +1029,8 @@ void CommandListSample::CompileDrawCommandList() {
                 1, 0, 0},
             &token_buffer);
       }
+      vbo_address += real_render_objects[i]->mesh_renderer().VertexAttribSize();
+      ibo_address += real_render_objects[i]->mesh_renderer().VertexElementSize();
     }
 
     if (last_state != -1) {
