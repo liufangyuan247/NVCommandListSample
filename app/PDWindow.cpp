@@ -163,7 +163,6 @@ void LoadMapDataThreaded(const std::vector<fs::path>& files,
       // printf("parsing file: %s\n", directory_entry.path().string().c_str());
       auto object = CreateRenderObjectFromJson(json);
       if (object) {
-        // object->Initialize();
         objects[current_slot_idx] = std::move(object);
       }
     }
@@ -335,7 +334,7 @@ void PDWindow::onInitialize() {
   ImGui::StyleColorsDark();
   GetGLExtension();
 
-  PrintOpenGLCapablities();  
+  PrintOpenGLCapablities();
 
   command_list_supported_ =
       ExtensionsSupport(kCommandListPrerequisiteExtensions);
@@ -345,10 +344,8 @@ void PDWindow::onInitialize() {
   }
 
   // UBO
-  glGenBuffers(1, &scene_ubo_);
-  glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  glCreateBuffers(1, &scene_ubo_);
+  glNamedBufferData(scene_ubo_, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
   glBindBufferBase(GL_UNIFORM_BUFFER, UBO_SCENE, scene_ubo_);
 
   if (command_list_supported_) {
@@ -357,9 +354,7 @@ void PDWindow::onInitialize() {
     glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
   }
 
-  glGenBuffers(1, &object_ubo_);
-  glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  glCreateBuffers(1, &object_ubo_);
 
   program_manager_.m_filetype = nvh::ShaderFileManager::FILETYPE_GLSL;
   program_manager_.addDirectory("./assets/shaders/");
@@ -469,9 +464,7 @@ void PDWindow::onUpdate() {
 
   scene_data_.VP = projection * view;
 
-  glBindBuffer(GL_UNIFORM_BUFFER, scene_ubo_);
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SceneData), &scene_data_);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  glNamedBufferSubData(scene_ubo_, 0, sizeof(SceneData), &scene_data_);
 
   for (auto& k_v : shader_manager_.loaded_programs()) {
     gl_context_.glUseProgram(k_v.second);
@@ -634,20 +627,18 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
 
   {
     // ProfileTimer timer("upload uniform data");
-    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
     if (object_ubo_size_ < object_datas.size() * data_stride) {
-      glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
-                   GL_DYNAMIC_DRAW);
+      glNamedBufferData(object_ubo_, object_datas.size() * data_stride, 0,
+                        GL_DYNAMIC_DRAW);
       object_ubo_size_ = object_datas.size() * data_stride;
       object_ubo_address_ = 0;
     }
-    unsigned char* ptr = (unsigned char*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+    unsigned char* ptr =
+        (unsigned char*)glMapNamedBuffer(object_ubo_, GL_WRITE_ONLY);
     for (int i = 0; i < object_datas.size(); ++i) {
       memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
     }
-
-    glUnmapBuffer(GL_UNIFORM_BUFFER);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    glUnmapNamedBuffer(object_ubo_);
   }
 
   {
@@ -655,8 +646,8 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
 
     for (int i = 0; i < real_render_objects.size(); ++i) {
       const RenderObject* object = real_render_objects[i];
-      GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
-      gl_context_.glUseProgram(program);
+      GLuint program = shader_manager_.GetShader(object->shader() +
+      "_uniform"); gl_context_.glUseProgram(program);
       glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
                         i * data_stride, sizeof(ObjectData));
       const_cast<RenderObject*>(object)->Render(shader_manager_);
@@ -669,11 +660,11 @@ void PDWindow::BindFallbackFramebuffer() {
   glGetIntegerv(GL_SAMPLES, &real_sample_count);
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,
                 (int*)&command_list_data_.original_framebuffer);
-  glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
   if (real_sample_count != kMultiSampleCount) {
     kMultiSampleCount = real_sample_count;
     ResizeCommandListRenderbuffers(width, height);
   }
+  glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
 }
 
 void PDWindow::BlitFallbackFramebuffer() {
@@ -766,11 +757,9 @@ void PDWindow::CompileDrawCommandList() {
   // Setup token buffer
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
   {
-    glBindBuffer(GL_UNIFORM_BUFFER, object_ubo_);
     if (object_ubo_size_ < object_datas.size() * data_stride) {
-      glBufferData(GL_UNIFORM_BUFFER, object_datas.size() * data_stride, 0,
-                   GL_DYNAMIC_DRAW);
       object_ubo_size_ = object_datas.size() * data_stride;
+      glNamedBufferData(object_ubo_, object_ubo_size_, 0, GL_DYNAMIC_DRAW);
       object_ubo_address_ = 0;
     }
     if (!object_ubo_address_) {
@@ -779,14 +768,17 @@ void PDWindow::CompileDrawCommandList() {
       glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
     }
 
+    // FIXME? State capture procedure will interfere with the object_ubo_ mapping
     unsigned char* ptr =
-        (unsigned char*)glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+        (unsigned char*)glMapNamedBuffer(object_ubo_, GL_WRITE_ONLY);
+    for (int i = 0; i < object_datas.size(); ++i) {
+      memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
+    }
+    glUnmapNamedBuffer(object_ubo_);
 
     // Build token buffer
     for (int i = 0; i < object_datas.size(); ++i) {
       token_sequence.states[i] = CaptureState(render_object_states[i]);
-
-      memcpy(ptr + data_stride * i, &object_datas[i], sizeof(ObjectData));
 
       const RenderObject* object = real_render_objects[i];
       auto line_object = dynamic_cast<const LineObject*>(object);
@@ -877,8 +869,6 @@ void PDWindow::CompileDrawCommandList() {
       token_sequence.offsets[i] = offset;
       token_sequence.sizes[i] = size;
     }
-    glUnmapBuffer(GL_UNIFORM_BUFFER);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     // Transfer data to buffer
     if (command_list_data_.command_stream_buffer_size < token_buffer.size()) {
@@ -996,10 +986,10 @@ void PDWindow::FinalizeCommandListResouce() {
 
   std::vector<GLuint> all_cached_states;
   std::transform(state_caches_.begin(), state_caches_.end(),
-                std::back_inserter(all_cached_states),
-                [](const CaptureStateData& capture_state) {
-                  return capture_state.state_object;
-                });
+                 std::back_inserter(all_cached_states),
+                 [](const CaptureStateData& capture_state) {
+                   return capture_state.state_object;
+                 });
 
   glDeleteStatesNV(all_cached_states.size(), all_cached_states.data());
 
@@ -1009,10 +999,11 @@ void PDWindow::FinalizeCommandListResouce() {
 }
 
 GLuint PDWindow::CaptureState(const CapturedStateCache& state_cache) {
-  auto iter = std::find_if(state_caches_.begin(), state_caches_.end(),
-                           [&state_cache](const CaptureStateData& capture_state) {
-                             return capture_state.state_cached == state_cache;
-                           });
+  auto iter =
+      std::find_if(state_caches_.begin(), state_caches_.end(),
+                   [&state_cache](const CaptureStateData& capture_state) {
+                     return capture_state.state_cached == state_cache;
+                   });
   if (iter != state_caches_.end()) {
     return iter->state_object;
   }

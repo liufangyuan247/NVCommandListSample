@@ -66,7 +66,7 @@ class PDWindow : public Window {
     kCommandToken,
     kCommandList,
     kMethodCount,
-  } draw_method_ = kBasicUniformBuffer;
+  } draw_method_ = kCommandToken;
 
   struct NVTokenSequence {
     std::vector<GLintptr> offsets;
