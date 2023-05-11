@@ -104,7 +104,7 @@ class MeshRenderer {
     }
     if (vertex_attrib_mask & (1 << UV)) {
       glEnableVertexAttribArray(UV);
-      glVertexAttribFormat(UV, Mesh::ColorType::length(), GL_FLOAT, GL_FALSE,
+      glVertexAttribFormat(UV, Mesh::UVType::length(), GL_FLOAT, GL_FALSE,
                            offset);
       glVertexAttribBinding(UV, 0);
       offset += sizeof(Mesh::UVType);
