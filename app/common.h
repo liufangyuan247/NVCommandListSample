@@ -7,10 +7,11 @@
 
 #define UBO_SCENE 0
 #define UBO_OBJECT 1
+#define UBO_MATERIAL 2
 
 #if defined(GL_core_profile) || defined(GL_compatibility_profile) || defined(GL_es_profile)
 
-// #extension GL_ARB_bindless_texture : require
+#extension GL_ARB_bindless_texture : require
 #extension GL_NV_command_list : enable
 
 #endif
@@ -19,6 +20,7 @@
 namespace common
 {
   using namespace glm;
+  using sampler2D = GLuint64;
 #endif
 
 struct SceneData {
@@ -28,6 +30,10 @@ struct SceneData {
 struct ObjectData {
   mat4 M;
   vec4 color;
+};
+
+struct MaterialData {
+  sampler2D texture;
 };
 
 #ifdef __cplusplus
@@ -46,6 +52,10 @@ layout(std140,binding=UBO_SCENE) uniform sceneBuffer {
 
 layout(std140,binding=UBO_OBJECT) uniform objectBuffer {
   ObjectData  object;
+};
+
+layout(std140,binding=UBO_MATERIAL) uniform materialBuffer {
+  MaterialData  material;
 };
 
 #endif

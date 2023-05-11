@@ -56,9 +56,16 @@ class PDWindow : public Window {
   GLuint scene_ubo_;
   GLuint64 scene_ubo_address_;
 
+  common::MaterialData material_data_[2];
+  GLuint material_ubo_;
+  GLuint64 material_ubo_address_;
+
   GLuint object_ubo_;
   GLuint64 object_ubo_address_;
   int object_ubo_size_= 0;
+
+  GLuint texture_[2];
+  GLuint64 texture_address_[2];
 
   enum DrawMethod {
     kBasic = 0,
@@ -129,6 +136,7 @@ class PDWindow : public Window {
   bool selective_draw_ = false;
   int selective_draw_start_ = 0;
   int selective_draw_count_ = 0;
+  float cameraSpeed = 100.0f;
 
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;

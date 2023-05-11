@@ -21,6 +21,7 @@ namespace {
 
 using SceneData = common::SceneData;
 using ObjectData = common::ObjectData;
+using MaterialData = common::MaterialData;
 using us = std::chrono::microseconds;
 namespace fs = std::experimental::filesystem;
 using namespace nvgl;
@@ -225,7 +226,6 @@ std::vector<glm::vec3> tangents;
 
 float radius = 1000.0f;
 int pointsCount = 200;
-float cameraSpeed = 100.0f;
 
 // 初始化Spline的控制点和对应的时间
 void InitSpline(const float radius, const int pointsCount,
@@ -311,6 +311,26 @@ void PrintOpenGLCapablities() {
          uniform_buffer_offset_alignment);
 }
 
+GLuint LoadTexture(const char* path) {
+  GLuint texture = 0;
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  stbi_uc* pixels = stbi_load(path, &width, &height, &channels, 4);
+  if (pixels) {
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(pixels);
+  } else {
+    printf("failed to load texture: %s\n", path);
+  }
+  return texture;
+}
+
 }  // namespace
 
 PDWindow::~PDWindow() {
@@ -343,6 +363,17 @@ void PDWindow::onInitialize() {
     InitializeCommandListResouce();
   }
 
+  texture_[0] = LoadTexture("assets/textures/uvtest.jpg");
+  texture_[1] = LoadTexture("assets/textures/uvtest.png");
+
+  if (command_list_supported_) {
+    for (int i = 0; i < 2; ++i) {
+      texture_address_[i] = glGetTextureHandleNV(texture_[i]);
+      material_data_[i].texture = texture_address_[i];
+      glMakeTextureHandleResidentNV(texture_address_[i]);
+    }
+  }
+
   // UBO
   glCreateBuffers(1, &scene_ubo_);
   glNamedBufferData(scene_ubo_, sizeof(SceneData), nullptr, GL_DYNAMIC_DRAW);
@@ -352,6 +383,23 @@ void PDWindow::onInitialize() {
     glGetNamedBufferParameterui64vNV(scene_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
                                      &scene_ubo_address_);
     glMakeNamedBufferResidentNV(scene_ubo_, GL_READ_ONLY);
+  }
+
+  glCreateBuffers(1, &material_ubo_);
+  glNamedBufferData(material_ubo_,
+                    UniformBufferAlignedOffset(sizeof(MaterialData)) * 2,
+                    nullptr, GL_STATIC_DRAW);
+  glNamedBufferSubData(material_ubo_, 0, sizeof(MaterialData),
+                       &material_data_[0]);
+  glNamedBufferSubData(material_ubo_,
+                       UniformBufferAlignedOffset(sizeof(MaterialData)),
+                       sizeof(MaterialData), &material_data_[1]);
+  glBindBufferBase(GL_UNIFORM_BUFFER, UBO_MATERIAL, material_ubo_);
+
+  if (command_list_supported_) {
+    glGetNamedBufferParameterui64vNV(material_ubo_, GL_BUFFER_GPU_ADDRESS_NV,
+                                     &material_ubo_address_);
+    glMakeNamedBufferResidentNV(material_ubo_, GL_READ_ONLY);
   }
 
   glCreateBuffers(1, &object_ubo_);
@@ -400,15 +448,15 @@ void PDWindow::onInitialize() {
   shader_manager_.RegisterShaderForName(
       "unlit_colored_uniform", program_manager_.get(unlit_colored_uniform_id));
   shader_manager_.RegisterShaderForName(
-      "simple_texture_colored", program_manager_.get(simple_texture_object_id));
+      "simple_textured_object", program_manager_.get(simple_texture_object_id));
   shader_manager_.RegisterShaderForName(
-      "simple_texture_colored_uniform",
+      "simple_textured_object_uniform",
       program_manager_.get(simple_texture_object_uniform_id));
 
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
 
-  InitSpline(radius, pointsCount, cameraSpeed, points, times, tangents);
+  InitSpline(radius, pointsCount, cameraSpeed, points, times, tangents);  
 }
 
 void PDWindow::onUpdate() {
@@ -420,7 +468,7 @@ void PDWindow::onUpdate() {
     glm::vec3 forward = camera_.forward();
     glm::vec3 right = camera_.right();
 
-    float speed = input.Shift() ? 100.0f : 1.0f;
+    float speed = input.Shift() ? cameraSpeed : 1.0f;
     float dis = speed * Time::deltaTime();
 
     glm::vec3 target = camera_.target();
@@ -520,6 +568,8 @@ void PDWindow::onUIUpdate() {
     draw_method_ = static_cast<DrawMethod>(current_method);
   }
 
+  ImGui::DragFloat(u8"camera speed", &cameraSpeed, 1.0);
+
   bool cache_state = gl_context_.cache_state();
   ImGui::Checkbox(u8"State Cache", &cache_state);
   gl_context_.set_cache_state(cache_state);
@@ -545,10 +595,20 @@ void PDWindow::onResize(int w, int h) {
 void PDWindow::onEndFrame() { Window::onEndFrame(); }
 
 void PDWindow::DrawSceneBasic() {
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture_[0]);
+
+  std::set<std::string> shaders;
+
   // ProfileTimer timer("collect uniform data");
   auto pre_render_func =
       [&shader_manager_ = shader_manager_,
-       &gl_context = gl_context_](RenderObject* render_object) -> bool {
+       &gl_context = gl_context_, &shaders = shaders](RenderObject* render_object) -> bool {
+    shaders.insert(render_object->shader());
+    if (!render_object->shader().empty() && render_object->shader() != "simple_textured_object") {
+      return false;
+    }
+
     GLuint program = shader_manager_.GetShader(render_object->shader());
     gl_context.glUseProgram(program);
 
@@ -559,7 +619,10 @@ void PDWindow::DrawSceneBasic() {
       glUniformMatrix4fv(M_loc, 1, GL_FALSE,
                          glm::value_ptr(render_object->world()));
     }
-
+    int tex0_loc = program ? glGetUniformLocation(program, "tex0") : -1;
+    if (M_loc != -1) {
+      glUniform1i(tex0_loc, 0);
+    }
     auto line_object = dynamic_cast<LineObject*>(render_object);
     if (line_object && color_loc != -1) {
       glUniform4fv(color_loc, 1, glm::value_ptr(line_object->color()));
@@ -579,6 +642,10 @@ void PDWindow::DrawSceneBasic() {
 
   for (auto& object : render_objects_) {
     object->Render(shader_manager_, pre_render_func);
+  }
+
+  for (auto& shader : shaders) {
+    printf("used shader %s\n", shader.c_str());
   }
 }
 
@@ -811,6 +878,21 @@ void PDWindow::CompileDrawCommandList() {
                                     glGetStageIndexNV(GL_FRAGMENT_SHADER),
                                     scene_ubo_address_},
             &token_buffer);
+
+        static int flip = 0;
+        PushCommandToBuffer(
+            UniformAddressCommandNV{
+                header, UBO_MATERIAL, glGetStageIndexNV(GL_VERTEX_SHADER),
+                material_ubo_address_ +
+                    flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
+            &token_buffer);
+        PushCommandToBuffer(
+            UniformAddressCommandNV{
+                header, UBO_MATERIAL, glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                material_ubo_address_ +
+                    flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
+            &token_buffer);
+        flip = 1 - flip;
       }
 
       // Set up vertex attrib binding info
