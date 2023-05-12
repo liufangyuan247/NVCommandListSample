@@ -1,4 +1,4 @@
-#include "PDWindow.h"
+#include "Sample.h"
 
 #include <atomic>
 #include <chrono>
@@ -229,7 +229,7 @@ int pointsCount = 200;
 
 // 初始化Spline的控制点和对应的时间
 void InitSpline(const float radius, const int pointsCount,
-                const float cameraSpeed, std::vector<glm::vec3>& points,
+                const float camera_speed_, std::vector<glm::vec3>& points,
                 std::vector<float>& times, std::vector<glm::vec3>& tangents) {
   srand(1000);
   // 随机生成控制点
@@ -260,7 +260,7 @@ void InitSpline(const float radius, const int pointsCount,
   for (int i = 0; i < points.size() - 1; i++) {
     times.push_back(time);
     float distance = glm::length(points[i + 1] - points[i]);
-    time += distance / cameraSpeed;
+    time += distance / camera_speed_;
   }
 }
 
@@ -333,15 +333,15 @@ GLuint LoadTexture(const char* path) {
 
 }  // namespace
 
-PDWindow::~PDWindow() {
+CommandListSample::~CommandListSample() {
   if (command_list_supported_) {
     FinalizeCommandListResouce();
   }
 }
 
-PDWindow::PDWindow() : Window(u8"NVCommandListDemo") {}
+CommandListSample::CommandListSample() : Window(u8"NVCommandListSample") {}
 
-void PDWindow::onInitialize() {
+void CommandListSample::onInitialize() {
   Window::onInitialize();
 
   {
@@ -456,10 +456,10 @@ void PDWindow::onInitialize() {
   glClearColor(0.1, 0.1, 0.1, 1);
   glClearDepth(1.0);
 
-  InitSpline(radius, pointsCount, cameraSpeed, points, times, tangents);  
+  InitSpline(radius, pointsCount, camera_speed_, points, times, tangents);
 }
 
-void PDWindow::onUpdate() {
+void CommandListSample::onUpdate() {
   Window::onUpdate();
   gl_context_.glUseProgram(0);
 
@@ -468,7 +468,7 @@ void PDWindow::onUpdate() {
     glm::vec3 forward = camera_.forward();
     glm::vec3 right = camera_.right();
 
-    float speed = input.Shift() ? cameraSpeed : 1.0f;
+    float speed = input.Shift() ? camera_speed_ * 100.0f : camera_speed_;
     float dis = speed * Time::deltaTime();
 
     glm::vec3 target = camera_.target();
@@ -524,7 +524,7 @@ void PDWindow::onUpdate() {
   }
 }
 
-void PDWindow::onRender() {
+void CommandListSample::onRender() {
   ProfileTimer timer("OnRender");
   if (command_list_supported_) {
     BindFallbackFramebuffer();
@@ -551,7 +551,7 @@ void PDWindow::onRender() {
   }
 }
 
-void PDWindow::onUIUpdate() {
+void CommandListSample::onUIUpdate() {
   Window::onUIUpdate();
   ImGui::ShowDemoWindow();
 
@@ -568,7 +568,7 @@ void PDWindow::onUIUpdate() {
     draw_method_ = static_cast<DrawMethod>(current_method);
   }
 
-  ImGui::DragFloat(u8"camera speed", &cameraSpeed, 1.0);
+  ImGui::DragFloat(u8"camera speed", &camera_speed_, 1.0);
 
   bool cache_state = gl_context_.cache_state();
   ImGui::Checkbox(u8"State Cache", &cache_state);
@@ -584,7 +584,7 @@ void PDWindow::onUIUpdate() {
   ImGui::End();
 }
 
-void PDWindow::onResize(int w, int h) {
+void CommandListSample::onResize(int w, int h) {
   Window::onResize(w, h);
   if (command_list_supported_) {
     ResizeCommandListRenderbuffers(w, h);
@@ -592,23 +592,16 @@ void PDWindow::onResize(int w, int h) {
   glViewport(0, 0, w, h);
 }
 
-void PDWindow::onEndFrame() { Window::onEndFrame(); }
+void CommandListSample::onEndFrame() { Window::onEndFrame(); }
 
-void PDWindow::DrawSceneBasic() {
+void CommandListSample::DrawSceneBasic() {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, texture_[0]);
-
-  std::set<std::string> shaders;
 
   // ProfileTimer timer("collect uniform data");
   auto pre_render_func =
       [&shader_manager_ = shader_manager_,
-       &gl_context = gl_context_, &shaders = shaders](RenderObject* render_object) -> bool {
-    shaders.insert(render_object->shader());
-    if (!render_object->shader().empty() && render_object->shader() != "simple_textured_object") {
-      return false;
-    }
-
+       &gl_context = gl_context_](RenderObject* render_object) -> bool {
     GLuint program = shader_manager_.GetShader(render_object->shader());
     gl_context.glUseProgram(program);
 
@@ -643,13 +636,9 @@ void PDWindow::DrawSceneBasic() {
   for (auto& object : render_objects_) {
     object->Render(shader_manager_, pre_render_func);
   }
-
-  for (auto& shader : shaders) {
-    printf("used shader %s\n", shader.c_str());
-  }
 }
 
-void PDWindow::DrawSceneBasicUniformBuffer() {
+void CommandListSample::DrawSceneBasicUniformBuffer() {
   // Collect uniform data in buffer
   std::vector<RenderObject*> real_render_objects;
   std::vector<ObjectData> object_datas;
@@ -713,8 +702,8 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
 
     for (int i = 0; i < real_render_objects.size(); ++i) {
       const RenderObject* object = real_render_objects[i];
-      GLuint program = shader_manager_.GetShader(object->shader() +
-      "_uniform"); gl_context_.glUseProgram(program);
+      GLuint program = shader_manager_.GetShader(object->shader() + "_uniform");
+      gl_context_.glUseProgram(program);
       glBindBufferRange(GL_UNIFORM_BUFFER, UBO_OBJECT, object_ubo_,
                         i * data_stride, sizeof(ObjectData));
       const_cast<RenderObject*>(object)->Render(shader_manager_);
@@ -722,7 +711,7 @@ void PDWindow::DrawSceneBasicUniformBuffer() {
   }
 }
 
-void PDWindow::BindFallbackFramebuffer() {
+void CommandListSample::BindFallbackFramebuffer() {
   int real_sample_count = 0;
   glGetIntegerv(GL_SAMPLES, &real_sample_count);
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,
@@ -734,7 +723,7 @@ void PDWindow::BindFallbackFramebuffer() {
   glBindFramebuffer(GL_FRAMEBUFFER, command_list_data_.fallback_framebuffer);
 }
 
-void PDWindow::BlitFallbackFramebuffer() {
+void CommandListSample::BlitFallbackFramebuffer() {
   glBindFramebuffer(GL_READ_FRAMEBUFFER,
                     command_list_data_.fallback_framebuffer);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
@@ -743,7 +732,7 @@ void PDWindow::BlitFallbackFramebuffer() {
                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
 }
 
-void PDWindow::CollectRenderObjectData(
+void CommandListSample::CollectRenderObjectData(
     std::vector<ObjectData>& object_datas,
     std::vector<RenderObject*>& real_render_objects,
     std::vector<CapturedStateCache>& render_object_states) {
@@ -797,7 +786,7 @@ void PDWindow::CollectRenderObjectData(
   }
 }
 
-void PDWindow::CompileDrawCommandList() {
+void CommandListSample::CompileDrawCommandList() {
   if (command_list_data_.draw_commands_compiled) {
     return;
   }
@@ -835,7 +824,8 @@ void PDWindow::CompileDrawCommandList() {
       glMakeNamedBufferResidentNV(object_ubo_, GL_READ_ONLY);
     }
 
-    // FIXME? State capture procedure will interfere with the object_ubo_ mapping
+    // FIXME? State capture procedure will interfere with the object_ubo_
+    // mapping
     unsigned char* ptr =
         (unsigned char*)glMapNamedBuffer(object_ubo_, GL_WRITE_ONLY);
     for (int i = 0; i < object_datas.size(); ++i) {
@@ -968,7 +958,7 @@ void PDWindow::CompileDrawCommandList() {
   printf("total captured states: %d\n", state_caches_.size());
 }
 
-void PDWindow::DrawSceneCommandToken() {
+void CommandListSample::DrawSceneCommandToken() {
   if (!command_list_supported_) {
     return;
   }
@@ -1003,13 +993,13 @@ void PDWindow::DrawSceneCommandToken() {
   }
 }
 
-void PDWindow::DrawSceneCommandList() {
+void CommandListSample::DrawSceneCommandList() {
   if (!command_list_supported_) {
     return;
   }
 }
 
-void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
+void CommandListSample::ResizeCommandListRenderbuffers(int w, int h) {
   if (command_list_data_.color_texture) {
     glMakeTextureHandleNonResidentARB(command_list_data_.color_texture_handle);
     glMakeTextureHandleNonResidentARB(
@@ -1052,7 +1042,7 @@ void PDWindow::ResizeCommandListRenderbuffers(int w, int h) {
       command_list_data_.depth_stencil_texture_handle);
 }
 
-void PDWindow::InitializeCommandListResouce() {
+void CommandListSample::InitializeCommandListResouce() {
   glGenBuffers(1, &command_list_data_.command_stream_buffer);
   glBindBuffer(GL_ARRAY_BUFFER, command_list_data_.command_stream_buffer);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -1061,7 +1051,7 @@ void PDWindow::InitializeCommandListResouce() {
   ResizeCommandListRenderbuffers(width, height);
 }
 
-void PDWindow::FinalizeCommandListResouce() {
+void CommandListSample::FinalizeCommandListResouce() {
   glDeleteFramebuffers(1, &command_list_data_.fallback_framebuffer);
   glDeleteTextures(1, &command_list_data_.color_texture);
   glDeleteTextures(1, &command_list_data_.depth_stencil_texture);
@@ -1080,7 +1070,7 @@ void PDWindow::FinalizeCommandListResouce() {
       command_list_data_.depth_stencil_texture_handle);
 }
 
-GLuint PDWindow::CaptureState(const CapturedStateCache& state_cache) {
+GLuint CommandListSample::CaptureState(const CapturedStateCache& state_cache) {
   auto iter =
       std::find_if(state_caches_.begin(), state_caches_.end(),
                    [&state_cache](const CaptureStateData& capture_state) {
@@ -1097,7 +1087,7 @@ GLuint PDWindow::CaptureState(const CapturedStateCache& state_cache) {
   return state_object;
 }
 
-void PDWindow::CapturedStateCache::ApplyState() const {
+void CommandListSample::CapturedStateCache::ApplyState() const {
   glUseProgram(program);
   if (enable_line_stipple) {
     glEnable(GL_LINE_STIPPLE);

@@ -19,10 +19,10 @@
 #include "core/shader_manager.h"
 #include "core/opengl_context.h"
 
-class PDWindow : public Window {
+class CommandListSample : public Window {
  public:
-  PDWindow();
-  ~PDWindow();
+  CommandListSample();
+  ~CommandListSample();
   virtual void onInitialize();
   virtual void onRender();
   virtual void onUIUpdate();
@@ -136,7 +136,7 @@ class PDWindow : public Window {
   bool selective_draw_ = false;
   int selective_draw_start_ = 0;
   int selective_draw_count_ = 0;
-  float cameraSpeed = 100.0f;
+  float camera_speed_ = 100.0f;
 
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;

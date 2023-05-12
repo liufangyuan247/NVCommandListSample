@@ -1,5 +1,5 @@
 #include "core/Window.h"
-#include "app/PDWindow.h"
+#include "app/Sample.h"
 #include <map>
 #include <string>
 #include <memory>
@@ -20,7 +20,7 @@ int main(int argc, const char **argv)
 #endif
 {
 	glfwInit();
-	auto w1 = new PDWindow();
+	auto w1 = new CommandListSample();
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO &io = ImGui::GetIO();

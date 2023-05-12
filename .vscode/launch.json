@@ -8,7 +8,7 @@
       "name": "C++ Launch",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/pattern_designer",
+      "program": "${workspaceFolder}/command_list_sample",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

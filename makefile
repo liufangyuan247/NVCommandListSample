@@ -24,7 +24,7 @@ OUTPUT_OBJS=$(LIB_OBJS) $(MY_OBJS)
 
 CPPFLAGS=-lGLEW -lGL -lglfw -lpthread --std=c++17 -O3 -I. -lstdc++fs
 
-EXE_NAME = pattern_designer
+EXE_NAME = command_list_sample
 
 $(EXE_NAME):$(OUTPUT_OBJS)
 	g++ -Wformat -Wint-to-pointer-cast $(OUTPUT_OBJS) $(CPPFLAGS) -o $@
