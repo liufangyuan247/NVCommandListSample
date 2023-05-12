@@ -368,7 +368,7 @@ void PDWindow::onInitialize() {
 
   if (command_list_supported_) {
     for (int i = 0; i < 2; ++i) {
-      texture_address_[i] = glGetTextureHandleNV(texture_[i]);
+      texture_address_[i] = glGetTextureHandleARB(texture_[i]);
       material_data_[i].texture = texture_address_[i];
       glMakeTextureHandleResidentNV(texture_address_[i]);
     }
