@@ -149,9 +149,10 @@ nlohmann::json LoadJsonFromFile(const fs::path& path) {
 
 void LoadMapDataThreaded(const std::vector<fs::path>& files,
                          std::vector<std::unique_ptr<RenderObject>>& objects,
-                         std::atomic_int& slot_idx) {
+                         std::atomic_int& read_slot_idx,
+                         std::atomic_int& write_slot_idx) {
   while (true) {
-    int current_slot_idx = slot_idx++;
+    int current_slot_idx = read_slot_idx++;
     if (current_slot_idx >= files.size()) {
       break;
     }
@@ -164,7 +165,8 @@ void LoadMapDataThreaded(const std::vector<fs::path>& files,
       // printf("parsing file: %s\n", directory_entry.path().string().c_str());
       auto object = CreateRenderObjectFromJson(json);
       if (object) {
-        objects[current_slot_idx] = std::move(object);
+        int write_idx = write_slot_idx++;
+        objects[write_idx] = std::move(object);
       }
     }
   }
@@ -182,18 +184,21 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
   // files.resize(100);
 
   std::vector<std::unique_ptr<RenderObject>> objects(files.size());
-  std::atomic_int slot_idx{0};
+  std::atomic_int read_slot_idx{0};
+  std::atomic_int write_slot_idx{0};
   const int kThreadCount = 15;
   std::vector<std::thread> threads;
 
   for (int i = 0; i < kThreadCount; ++i) {
     threads.push_back(
-        std::thread([&]() { LoadMapDataThreaded(files, objects, slot_idx); }));
+        std::thread([&]() { LoadMapDataThreaded(files, objects, read_slot_idx, write_slot_idx); }));
   }
-  LoadMapDataThreaded(files, objects, slot_idx);
+  LoadMapDataThreaded(files, objects, read_slot_idx, write_slot_idx);
   for (int i = 0; i < kThreadCount; ++i) {
     threads[i].join();
   }
+
+  objects.resize(write_slot_idx);
 
   for (auto& object : objects) {
     object->Initialize();
@@ -581,6 +586,16 @@ void CommandListSample::onUIUpdate() {
   ImGui::DragInt(u8"Selective Draw Count", &selective_draw_count_, 1, 0,
                  command_list_data_.token_sequence.offsets.size());
 
+  ImGui::Text("total uniform buffer size: %fMB",
+              object_ubo_size_ / 1024.0f / 1024.0f);
+  ImGui::Text("total states: %d", state_caches_.size());
+  ImGui::Text("total token sequence count: %d",
+              command_list_data_.token_sequence.offsets.size());
+  ImGui::Text(
+      "total command token buffer size: %fMB",
+      command_list_data_.command_stream_buffer_size / 1024.0f / 1024.0f);
+  ImGui::Text("total road graph element count: %d", render_objects_.size());
+
   ImGui::End();
 }
 
@@ -759,6 +774,8 @@ void CommandListSample::CollectRenderObjectData(
       should_continue = false;
       render_state.enable_line_stipple =
           (uint8_t)line_object->line_style().line_stipple;
+      render_state.stipple_factor = line_object->line_style().line_stipple_factor;
+      render_state.stipple_pattern = line_object->line_style().line_stipple_pattern;
     }
     auto dashed_stripe_object =
         dynamic_cast<const DashedStripeObject*>(render_object);
@@ -809,6 +826,8 @@ void CommandListSample::CompileDrawCommandList() {
   token_sequence.states.resize(object_datas.size());
   token_sequence.fbos.resize(object_datas.size(),
                              command_list_data_.fallback_framebuffer);
+
+  GLuint texture_shader = shader_manager_.GetShader("simple_textured_object_uniform");
 
   // Setup token buffer
   int data_stride = UniformBufferAlignedOffset(sizeof(ObjectData));
@@ -869,20 +888,22 @@ void CommandListSample::CompileDrawCommandList() {
                                     scene_ubo_address_},
             &token_buffer);
 
-        static int flip = 0;
-        PushCommandToBuffer(
-            UniformAddressCommandNV{
-                header, UBO_MATERIAL, glGetStageIndexNV(GL_VERTEX_SHADER),
-                material_ubo_address_ +
-                    flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
-            &token_buffer);
-        PushCommandToBuffer(
-            UniformAddressCommandNV{
-                header, UBO_MATERIAL, glGetStageIndexNV(GL_FRAGMENT_SHADER),
-                material_ubo_address_ +
-                    flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
-            &token_buffer);
-        flip = 1 - flip;
+        if (render_object_states[i].program == texture_shader) {
+          static int flip = 0;
+          PushCommandToBuffer(
+              UniformAddressCommandNV{
+                  header, UBO_MATERIAL, glGetStageIndexNV(GL_VERTEX_SHADER),
+                  material_ubo_address_ +
+                      flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
+              &token_buffer);
+          PushCommandToBuffer(
+              UniformAddressCommandNV{
+                  header, UBO_MATERIAL, glGetStageIndexNV(GL_FRAGMENT_SHADER),
+                  material_ubo_address_ +
+                      flip * UniformBufferAlignedOffset(sizeof(MaterialData))},
+              &token_buffer);
+          flip = 1 - flip;          
+        }
       }
 
       // Set up vertex attrib binding info
@@ -909,8 +930,9 @@ void CommandListSample::CompileDrawCommandList() {
       if (line_object) {
         uint header = glGetCommandHeaderNV(GL_LINE_WIDTH_COMMAND_NV,
                                            sizeof(LineWidthCommandNV));
+        float line_width = glm::clamp(line_object->line_style().line_width, 0.5f, 10.0f);
         PushCommandToBuffer(
-            LineWidthCommandNV{header, line_object->line_style().line_width},
+            LineWidthCommandNV{header, line_width},
             &token_buffer);
       }
 
@@ -1091,6 +1113,7 @@ void CommandListSample::CapturedStateCache::ApplyState() const {
   glUseProgram(program);
   if (enable_line_stipple) {
     glEnable(GL_LINE_STIPPLE);
+    glLineStipple(stipple_factor, stipple_pattern);
   } else {
     glDisable(GL_LINE_STIPPLE);
   }

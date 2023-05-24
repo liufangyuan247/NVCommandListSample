@@ -70,6 +70,7 @@
     "forward_list": "cpp",
     "*.ipp": "cpp",
     "codecvt": "cpp",
-    "filesystem": "cpp"
+    "filesystem": "cpp",
+    "*.txx": "cpp"
   }
 }

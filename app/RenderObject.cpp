@@ -28,6 +28,42 @@ const std::map<std::string, factory_func> kRegisteredFacotryFuncMap{
      []() -> std::unique_ptr<RenderObject> {
        return std::make_unique<RoadElementObject>();
      }},
+    {"PolygonObjectRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"SidewalkRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"SpeedBumpRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"SignalLaneRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"SignalStopLineRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"CrosswalkRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"GroupObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"ClearAreaRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
+    {"StopLineRenderObject",
+     []() -> std::unique_ptr<RenderObject> {
+       return std::make_unique<RoadElementObject>();
+     }},
 };
 
 }  // namespace

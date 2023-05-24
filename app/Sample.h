@@ -87,6 +87,8 @@ class CommandListSample : public Window {
     GLenum base_draw_mode = 0;
     GLuint program = 0;
     uint8_t enable_line_stipple = 0;
+    GLint stipple_factor = 1;
+    GLushort stipple_pattern = 0xffff;
     uint16_t vertex_attrib_mask = 0;
 
     bool operator==(const CapturedStateCache& other) const {
