@@ -821,11 +821,10 @@ void CommandListSample::CompileDrawCommandList() {
 
   ProfileTimer timer("  record render commands");
 
-  token_sequence.offsets.resize(object_datas.size());
-  token_sequence.sizes.resize(object_datas.size());
-  token_sequence.states.resize(object_datas.size());
-  token_sequence.fbos.resize(object_datas.size(),
-                             command_list_data_.fallback_framebuffer);
+  token_sequence.offsets.clear();
+  token_sequence.sizes.clear();
+  token_sequence.states.clear();
+  token_sequence.fbos.clear();
 
   GLuint texture_shader = shader_manager_.GetShader("simple_textured_object_uniform");
 
@@ -852,9 +851,24 @@ void CommandListSample::CompileDrawCommandList() {
     }
     glUnmapNamedBuffer(object_ubo_);
 
+    GLuint last_state = -1;
+    GLintptr last_offset = -1;
+
     // Build token buffer
     for (int i = 0; i < object_datas.size(); ++i) {
-      token_sequence.states[i] = CaptureState(render_object_states[i]);
+      GLuint state = CaptureState(render_object_states[i]);
+
+      if (last_state != state) {
+        if (last_state != -1) {
+          // record draw command
+          token_sequence.offsets.push_back(last_offset);
+          token_sequence.sizes.push_back(token_buffer.size() - last_offset);
+          token_sequence.states.push_back(last_state);
+          token_sequence.fbos.push_back(command_list_data_.fallback_framebuffer);
+        }
+        last_state = state;
+        last_offset = token_buffer.size();
+      }
 
       const RenderObject* object = real_render_objects[i];
       auto line_object = dynamic_cast<const LineObject*>(object);
@@ -958,10 +972,14 @@ void CommandListSample::CompileDrawCommandList() {
                 1, 0, 0},
             &token_buffer);
       }
+    }
 
-      int size = token_buffer.size() - offset;
-      token_sequence.offsets[i] = offset;
-      token_sequence.sizes[i] = size;
+    if (last_state != -1) {
+      // record draw command
+      token_sequence.offsets.push_back(last_offset);
+      token_sequence.sizes.push_back(token_buffer.size() - last_offset);
+      token_sequence.states.push_back(last_state);
+      token_sequence.fbos.push_back(command_list_data_.fallback_framebuffer);
     }
 
     // Transfer data to buffer
