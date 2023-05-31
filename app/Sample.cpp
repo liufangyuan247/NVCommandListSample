@@ -495,7 +495,7 @@ void CommandListSample::onUpdate() {
       const float sensitivity = 0.1f;
       glm::vec2 picth_yaw = camera_.look_pitch_yaw();
       picth_yaw += glm::vec2{-input.deltaY(), input.deltaX()} * sensitivity;
-      picth_yaw.x = glm::clamp(picth_yaw.x, -90.0f, 90.0f);
+      picth_yaw.x = glm::clamp(picth_yaw.x, -89.99f, 89.99f);
       camera_.set_look_pitch_yaw(picth_yaw);
     }
   }
@@ -574,6 +574,10 @@ void CommandListSample::onUIUpdate() {
   }
 
   ImGui::DragFloat(u8"camera speed", &camera_speed_, 1.0);
+  glm::vec3 camera_target = camera_.target();
+  if (ImGui::DragFloat3(u8"camera target", glm::value_ptr(camera_target), 1.0)) {
+    camera_.set_target(camera_target);
+  }
 
   bool cache_state = gl_context_.cache_state();
   ImGui::Checkbox(u8"State Cache", &cache_state);
