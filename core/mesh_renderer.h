@@ -166,8 +166,9 @@ class MeshRenderer {
     return mask;
   }
 
+  GLuint vbo() const { return vbo_; }
+  GLuint ibo() const { return ibo_; }
   GLuint64 vbo_address() const { return vbo_address_; }
-
   GLuint64 ibo_address() const { return ibo_address_; }
 
  private:
