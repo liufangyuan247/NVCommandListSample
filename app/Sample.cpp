@@ -415,35 +415,42 @@ void CommandListSample::onInitialize() {
 
   program_manager_.registerInclude("common.h");
 
+
+  const char* glsl_defines = R"(
+    #define ENABLE_BINDLESS_TEXTURE
+    #define ENABLE_COMMAND_LIST
+  )";
+
   ProgramID unlit_vertex_colored_id = program_manager_.createProgram(
-      ProgramManager::Definition(GL_VERTEX_SHADER,
+      ProgramManager::Definition(GL_VERTEX_SHADER, glsl_defines,
                                  "unlit_vertex_colored.vert.glsl"),
-      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+      ProgramManager::Definition(GL_FRAGMENT_SHADER, glsl_defines,
                                  "unlit_vertex_colored.frag.glsl"));
 
   ProgramID unlit_colored_id = program_manager_.createProgram(
-      ProgramManager::Definition(GL_VERTEX_SHADER,
+      ProgramManager::Definition(GL_VERTEX_SHADER, glsl_defines,
                                  "unlit_colored_default.vert.glsl"),
-      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+      ProgramManager::Definition(GL_FRAGMENT_SHADER, glsl_defines,
                                  "unlit_colored_default.frag.glsl"));
 
   ProgramID unlit_colored_uniform_id = program_manager_.createProgram(
-      ProgramManager::Definition(GL_VERTEX_SHADER,
+      ProgramManager::Definition(GL_VERTEX_SHADER, glsl_defines,
                                  "unlit_colored_uniform_buffer.vert.glsl"),
-      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+      ProgramManager::Definition(GL_FRAGMENT_SHADER, glsl_defines,
                                  "unlit_colored_uniform_buffer.frag.glsl"));
 
   ProgramID simple_texture_object_id = program_manager_.createProgram(
-      ProgramManager::Definition(GL_VERTEX_SHADER,
+      ProgramManager::Definition(GL_VERTEX_SHADER, glsl_defines,
                                  "simple_textured_object.vert.glsl"),
-      ProgramManager::Definition(GL_FRAGMENT_SHADER,
+      ProgramManager::Definition(GL_FRAGMENT_SHADER, glsl_defines,
                                  "simple_textured_object.frag.glsl"));
 
   ProgramID simple_texture_object_uniform_id = program_manager_.createProgram(
       ProgramManager::Definition(
-          GL_VERTEX_SHADER, "simple_textured_object_uniform_buffer.vert.glsl"),
+          GL_VERTEX_SHADER, glsl_defines,
+          "simple_textured_object_uniform_buffer.vert.glsl"),
       ProgramManager::Definition(
-          GL_FRAGMENT_SHADER,
+          GL_FRAGMENT_SHADER, glsl_defines,
           "simple_textured_object_uniform_buffer.frag.glsl"));
 
   shader_manager_.RegisterShaderForName(

@@ -11,8 +11,12 @@
 
 #if defined(GL_core_profile) || defined(GL_compatibility_profile) || defined(GL_es_profile)
 
-#extension GL_ARB_bindless_texture : require
+#ifdef ENABLE_BINDLESS_TEXTURE
+#extension GL_ARB_bindless_texture : enable
+#endif
+#ifdef ENABLE_COMMAND_LIST
 #extension GL_NV_command_list : enable
+#endif
 
 #endif
 
@@ -42,7 +46,7 @@ struct MaterialData {
 
 #if defined(GL_core_profile) || defined(GL_compatibility_profile) || defined(GL_es_profile)
 
-#if GL_NV_command_list
+#ifdef ENABLE_COMMAND_LIST
 layout(commandBindableNV) uniform;
 #endif
 
