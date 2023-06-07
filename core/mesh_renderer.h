@@ -2,63 +2,45 @@
 
 #include <vector>
 
+#include "core/buffer_manager.h"
 #include "core/mesh.h"
 
 class MeshRenderer {
  public:
   MeshRenderer() = default;
-  ~MeshRenderer() {
-    glMakeNamedBufferNonResidentNV(vbo_);
-    if (mesh_.indexed_draw()) {
-      glMakeNamedBufferNonResidentNV(ibo_);
-    }
-
-    glDeleteVertexArrays(1, &vao_);
-    glDeleteBuffers(1, &vbo_);
-    glDeleteBuffers(1, &ibo_);
-  }
+  ~MeshRenderer() { glDeleteVertexArrays(1, &vao_); }
   void set_mesh(Mesh&& mesh) { mesh_ = mesh; }
   const Mesh& mesh() const { return mesh_; }
 
   bool initialized() const { return vao_; }
-  void Initialize() {
+  void Initialize(BufferManager* buffer_manager) {
     if (mesh_.positions().empty()) {
       return;
     }
     if (!vao_) {
       glGenVertexArrays(1, &vao_);
     }
-    if (!vbo_) {
-      glGenBuffers(1, &vbo_);
-    }
-    if (mesh_.indexed_draw() && !ibo_) {
-      glGenBuffers(1, &ibo_);
-    }
 
     glBindVertexArray(vao_);
     uint64_t total_size = VertexAttribSize();
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, total_size, 0, GL_STATIC_DRAW);
-    void* buffer = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-    FillVertexBufferInterleaved(buffer);
-    glUnmapBuffer(GL_ARRAY_BUFFER);
-
+    vbo_proxy_ = buffer_manager->AllocateBuffer(total_size);
+    if (vbo_proxy_) {
+      void* buffer = vbo_proxy_->Map(GL_MAP_WRITE_BIT);
+      FillVertexBufferInterleaved(buffer);
+      vbo_proxy_->Unmap();
+    }
     SetupVertexAttribFormat();
-    glBindVertexBuffer(0, vbo_, 0, VertexAttribStride());
-
-    glGetNamedBufferParameterui64vNV(vbo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                     &vbo_address_);
-    glMakeNamedBufferResidentNV(vbo_, GL_READ_ONLY);
+    glBindVertexBuffer(0, 0, 0, VertexAttribStride());
 
     if (mesh_.indexed_draw()) {
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                   sizeof(Mesh::IndexType) * mesh_.indices().size(),
-                   mesh_.indices().data(), GL_STATIC_DRAW);
+      ibo_proxy_ = buffer_manager->AllocateBuffer(sizeof(Mesh::IndexType) *
+                                                  mesh_.indices().size());
 
-      glGetNamedBufferParameterui64vNV(ibo_, GL_BUFFER_GPU_ADDRESS_NV,
-                                       &ibo_address_);
-      glMakeNamedBufferResidentNV(ibo_, GL_READ_ONLY);
+      if (ibo_proxy_) {
+        ibo_proxy_->SetData(mesh_.indices().data(), 0,
+                            sizeof(Mesh::IndexType) * mesh_.indices().size());
+      }
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_proxy_->buffer_id());
     }
 
     glBindVertexArray(0);
@@ -71,11 +53,12 @@ class MeshRenderer {
       return;
     }
     glBindVertexArray(vao_);
-    glBindVertexBuffer(0, vbo_, 0, VertexAttribStride());
+    glBindVertexBuffer(0, vbo_proxy_->buffer_id(), vbo_proxy_->offset(),
+                       VertexAttribStride());
 
     if (mesh_.indexed_draw()) {
       glDrawElements(mesh_.draw_mode(), mesh_.indices().size(), GL_UNSIGNED_INT,
-                     0);
+                     reinterpret_cast<const void*>(ibo_proxy_->offset()));
     } else {
       glDrawArrays(mesh_.draw_mode(), 0, mesh_.positions().size());
     }
@@ -166,16 +149,12 @@ class MeshRenderer {
     return mask;
   }
 
-  GLuint vbo() const { return vbo_; }
-  GLuint ibo() const { return ibo_; }
-  GLuint64 vbo_address() const { return vbo_address_; }
-  GLuint64 ibo_address() const { return ibo_address_; }
+  const BufferProxy* vbo() const { return vbo_proxy_.get(); }
+  const BufferProxy* ibo() const { return ibo_proxy_.get(); }
 
  private:
+  std::unique_ptr<BufferProxy> vbo_proxy_;
+  std::unique_ptr<BufferProxy> ibo_proxy_;
   GLuint vao_ = 0;
-  GLuint vbo_ = 0;
-  GLuint ibo_ = 0;
-  GLuint64 vbo_address_ = 0;
-  GLuint64 ibo_address_ = 0;
   Mesh mesh_;
 };

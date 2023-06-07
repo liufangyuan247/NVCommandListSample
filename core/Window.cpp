@@ -115,7 +115,7 @@ Window::Window(const char* caption)
 
 	window = glfwCreateWindow(width, height, caption, 0, 0);
 	glfwMakeContextCurrent(window);
-	glfwSwapInterval(0);
+	glfwSwapInterval(1);
 
 	glewExperimental=true;
 	glewInit();

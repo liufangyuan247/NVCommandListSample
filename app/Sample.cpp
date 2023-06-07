@@ -26,6 +26,13 @@ using us = std::chrono::microseconds;
 namespace fs = std::experimental::filesystem;
 using namespace nvgl;
 
+constexpr int kBufferBlockSize = 128 * 1024 * 1024;  // 128 MB
+// constexpr int kBufferBlockSize = 0;
+
+std::chrono::time_point<std::chrono::system_clock> start_time;
+int64_t expected_frame_count = 0;
+int64_t frame_count = 0;
+
 class ProfileTimerGroup {
  public:
   ProfileTimerGroup(const std::string& entry_name) : entry_name_(entry_name) {}
@@ -174,7 +181,7 @@ void LoadMapDataThreaded(const std::vector<fs::path>& files,
 
 #define MULTI_THREAD
 std::vector<std::unique_ptr<RenderObject>> LoadMapData(
-    const std::string& map_directory) {
+    const std::string& map_directory, BufferManager* buffer_manager) {
 #ifdef MULTI_THREAD
   std::vector<fs::path> files;
   for (auto& directory_entry :
@@ -200,8 +207,14 @@ std::vector<std::unique_ptr<RenderObject>> LoadMapData(
 
   objects.resize(write_slot_idx);
 
+  std::vector<unsigned char> buffer(100000);
+
   for (auto& object : objects) {
-    object->Initialize();
+    object->Initialize(buffer_manager);
+
+    GLuint id;
+    glCreateBuffers(1, &id);
+    glNamedBufferData(id, buffer.size(), buffer.data(), GL_STATIC_DRAW);
   }
 #else
   std::vector<std::unique_ptr<RenderObject>> objects;
@@ -349,9 +362,10 @@ CommandListSample::CommandListSample() : Window(u8"NVCommandListSample") {}
 void CommandListSample::onInitialize() {
   Window::onInitialize();
 
+  buffer_manager_ = std::make_unique<BufferManager>(kBufferBlockSize);
   {
     ProfileTimer timer("LoadMapData");
-    render_objects_ = LoadMapData(kMapDataFolder);
+    render_objects_ = LoadMapData(kMapDataFolder, buffer_manager_.get());
   }
 
   printf("total render object count:%d\n", render_objects_.size());
@@ -469,6 +483,8 @@ void CommandListSample::onInitialize() {
   glClearDepth(1.0);
 
   InitSpline(radius, pointsCount, camera_speed_, points, times, tangents);
+  
+  start_time = std::chrono::high_resolution_clock::now();
 }
 
 void CommandListSample::onUpdate() {
@@ -606,6 +622,17 @@ void CommandListSample::onUIUpdate() {
       "total command token buffer size: %fMB",
       command_list_data_.command_stream_buffer_size / 1024.0f / 1024.0f);
   ImGui::Text("total road graph element count: %d", render_objects_.size());
+
+
+  auto duration = std::chrono::duration_cast<us>(
+                      std::chrono::high_resolution_clock::now() - start_time)
+                      .count();
+  expected_frame_count = duration / 16666;
+
+  ImGui::Text("frame count: %ld", frame_count);
+  ImGui::Text("expected frame count: %ld", expected_frame_count);
+
+  frame_count ++;
 
   ImGui::End();
 }
@@ -867,6 +894,10 @@ void CommandListSample::CompileDrawCommandList() {
 
     // Build token buffer
     for (int i = 0; i < object_datas.size(); ++i) {
+      if (real_render_objects[i]->mesh_renderer().mesh().positions().empty()) {
+        continue;
+      }
+
       GLuint state = CaptureState(render_object_states[i]);
 
       if (last_state != state) {
@@ -935,19 +966,24 @@ void CommandListSample::CompileDrawCommandList() {
       {
         uint header = glGetCommandHeaderNV(GL_ATTRIBUTE_ADDRESS_COMMAND_NV,
                                            sizeof(AttributeAddressCommandNV));
+        GLuint64 vbo_address = buffer_manager_->GetBufferAddress(
+            object->mesh_renderer().vbo()->buffer_id());
         PushCommandToBuffer(
-            AttributeAddressCommandNV{header, 0,
-                                      object->mesh_renderer().vbo_address()},
+            AttributeAddressCommandNV{
+                header, 0,
+                vbo_address + object->mesh_renderer().vbo()->offset()},
             &token_buffer);
       }
       // Set up index binding info
       if (object->mesh_renderer().mesh().indexed_draw()) {
         uint header = glGetCommandHeaderNV(GL_ELEMENT_ADDRESS_COMMAND_NV,
                                            sizeof(ElementAddressCommandNV));
+        GLuint64 ibo_address = buffer_manager_->GetBufferAddress(
+            object->mesh_renderer().ibo()->buffer_id());
         PushCommandToBuffer(
-            ElementAddressCommandNV{header,
-                                    object->mesh_renderer().ibo_address(),
-                                    sizeof(Mesh::IndexType)},
+            ElementAddressCommandNV{
+                header, ibo_address + object->mesh_renderer().ibo()->offset(),
+                sizeof(Mesh::IndexType)},
             &token_buffer);
       }
 
