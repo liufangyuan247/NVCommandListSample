@@ -22,7 +22,7 @@ LIB_OBJS=$(IMGUI_OBJS) $(NVH_OBJS) $(NVGL_OBJS)
 MY_OBJS=$(CORE_OBJS) $(APP_OBJS)
 OUTPUT_OBJS=$(LIB_OBJS) $(MY_OBJS) 
 
-CPPFLAGS=-lGLEW -lGL -lglfw -lpthread --std=c++17 -O3 -I. -lstdc++fs
+CPPFLAGS=-lGLEW -lGL -lglfw -lpthread --std=c++17 -g -I. -lstdc++fs
 
 EXE_NAME = command_list_sample
 

@@ -4,6 +4,7 @@
 
 #include "app/extension_command_list.h"
 #include "app/json.hpp"
+#include "core/buffer_manager.h"
 #include "core/mesh_renderer.h"
 #include "core/shader_manager.h"
 
@@ -28,10 +29,10 @@ class RenderObject {
   virtual ~RenderObject() = default;
 
   virtual void SerializeFromJson(const nlohmann::json& json) {}
-  virtual void Initialize() {}
+  virtual void Initialize(BufferManager* buffer_manager) {}
   virtual void Render(const ShaderManager& shader_manager,
-                            PreRenderCallback pre_render = nullptr,
-                            PostRenderCallback post_render = nullptr) {}
+                      PreRenderCallback pre_render = nullptr,
+                      PostRenderCallback post_render = nullptr) {}
 
   void set_world(const glm::mat4& world) { world_ = world; }
   const glm::mat4& world() const { return world_; }
@@ -39,12 +40,10 @@ class RenderObject {
   void set_shader(const std::string& shader) { shader_ = shader; }
   const std::string& shader() const { return shader_; }
 
-  const MeshRenderer& mesh_renderer() const {
-    return mesh_renderer_;
-  }
+  const MeshRenderer& mesh_renderer() const { return mesh_renderer_; }
 
  protected:
-  MeshRenderer mesh_renderer_; 
+  MeshRenderer mesh_renderer_;
 
  private:
   std::string shader_;
@@ -94,11 +93,13 @@ class LineObject : public RenderObject {
     mesh_renderer_.set_mesh(std::move(mesh));
   }
 
-  void Initialize() override { mesh_renderer_.Initialize(); }
+  void Initialize(BufferManager* buffer_manager) override {
+    mesh_renderer_.Initialize(buffer_manager);
+  }
 
   void Render(const ShaderManager& shader_manager,
-                    PreRenderCallback pre_render = nullptr,
-                    PostRenderCallback post_render = nullptr) override {
+              PreRenderCallback pre_render = nullptr,
+              PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
       return;
     }
@@ -149,11 +150,13 @@ class DashedStripeObject : public RenderObject {
     mesh_renderer_.set_mesh(std::move(mesh));
   }
 
-  void Initialize() override { mesh_renderer_.Initialize(); }
+  void Initialize(BufferManager* buffer_manager) override {
+    mesh_renderer_.Initialize(buffer_manager);
+  }
 
   void Render(const ShaderManager& shader_manager,
-                    PreRenderCallback pre_render = nullptr,
-                    PostRenderCallback post_render = nullptr) override {
+              PreRenderCallback pre_render = nullptr,
+              PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
       return;
     }
@@ -188,11 +191,13 @@ class SimpleTexturedObject : public RenderObject {
     mesh_renderer_.set_mesh(std::move(mesh));
   }
 
-  void Initialize() override { mesh_renderer_.Initialize(); }
+  void Initialize(BufferManager* buffer_manager) override {
+    mesh_renderer_.Initialize(buffer_manager);
+  }
 
   void Render(const ShaderManager& shader_manager,
-                    PreRenderCallback pre_render = nullptr,
-                    PostRenderCallback post_render = nullptr) override {
+              PreRenderCallback pre_render = nullptr,
+              PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
       return;
     }
@@ -224,15 +229,15 @@ class RoadElementObject : public RenderObject {
     }
   }
 
-  void Initialize() override {
+  void Initialize(BufferManager* buffer_manager) override {
     for (auto& sub_mesh : sub_meshes_) {
-      sub_mesh->Initialize();
+      sub_mesh->Initialize(buffer_manager);
     }
   }
 
   void Render(const ShaderManager& shader_manager,
-                    PreRenderCallback pre_render = nullptr,
-                    PostRenderCallback post_render = nullptr) override {
+              PreRenderCallback pre_render = nullptr,
+              PostRenderCallback post_render = nullptr) override {
     if (pre_render && !pre_render(this)) {
       return;
     }

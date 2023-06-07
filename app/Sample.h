@@ -140,6 +140,7 @@ class CommandListSample : public Window {
   int selective_draw_count_ = 0;
   float camera_speed_ = 100.0f;
 
+  std::unique_ptr<BufferManager> buffer_manager_;
   OpenGLContext gl_context_;
   std::vector<std::unique_ptr<RenderObject>> render_objects_;
 
