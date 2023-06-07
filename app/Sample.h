@@ -126,6 +126,8 @@ class CommandListSample : public Window {
     GLuint mesh_ibo_ = 0;
     GLuint64 mesh_vbo_address_ = 0;
     GLuint64 mesh_ibo_address_ = 0;
+    int mesh_vbo_size_ = 0;
+    int mesh_ibo_size_ = 0;
 
     bool draw_commands_compiled = false;
     GLuint command_stream_buffer = 0;

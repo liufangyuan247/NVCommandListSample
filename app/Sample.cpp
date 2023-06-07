@@ -599,6 +599,10 @@ void CommandListSample::onUIUpdate() {
 
   ImGui::Text("total uniform buffer size: %fMB",
               object_ubo_size_ / 1024.0f / 1024.0f);
+  ImGui::Text(
+      "total mesh buffer size: %fMB",
+      (command_list_data_.mesh_ibo_size_ + command_list_data_.mesh_vbo_size_) /
+          1024.0f / 1024.0f);
   ImGui::Text("total states: %d", state_caches_.size());
   ImGui::Text("total token sequence count: %d",
               command_list_data_.token_sequence.offsets.size());
@@ -839,6 +843,9 @@ void CommandListSample::CompileDrawCommandList() {
     vbo_size += mesh_render.VertexAttribSize();
     ibo_size += mesh_render.VertexElementSize();
   }
+
+  command_list_data_.mesh_vbo_size_ = vbo_size;
+  command_list_data_.mesh_ibo_size_ = ibo_size;
 
   // Generate vertex buffer
   glCreateBuffers(1, &command_list_data_.mesh_vbo_);
