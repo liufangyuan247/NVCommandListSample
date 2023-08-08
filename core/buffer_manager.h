@@ -85,7 +85,7 @@ class BufferManager {
       GLuint buffer_id;
       glCreateBuffers(1, &buffer_id);
       glNamedBufferStorage(buffer_id, size, nullptr,
-                           GL_MAP_WRITE_BIT | GL_MAP_READ_BIT);
+                           GL_MAP_WRITE_BIT | GL_MAP_READ_BIT | GL_DYNAMIC_STORAGE_BIT);
       auto proxy =
           std::unique_ptr<BufferProxy>(new BufferProxy(buffer_id, 0, size));
       proxy->manager_ = this;
@@ -106,7 +106,7 @@ class BufferManager {
     GLuint buffer_id;
     glCreateBuffers(1, &buffer_id);
     glNamedBufferStorage(buffer_id, block_size_, nullptr,
-                         GL_MAP_WRITE_BIT | GL_MAP_READ_BIT);
+                         GL_MAP_WRITE_BIT | GL_MAP_READ_BIT | GL_DYNAMIC_STORAGE_BIT);
     buffers_.emplace(buffer_id, std::make_unique<FirstFitBufferAllocator>(block_size_));
 
     return AllocateBuffer(size);

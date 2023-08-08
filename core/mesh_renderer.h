@@ -25,9 +25,12 @@ class MeshRenderer {
     uint64_t total_size = VertexAttribSize();
     vbo_proxy_ = buffer_manager->AllocateBuffer(total_size);
     if (vbo_proxy_) {
-      void* buffer = vbo_proxy_->Map(GL_MAP_WRITE_BIT);
-      FillVertexBufferInterleaved(buffer);
-      vbo_proxy_->Unmap();
+      std::vector<unsigned char> buffer(total_size);
+      FillVertexBufferInterleaved(buffer.data());
+      vbo_proxy_->SetData(buffer.data(), 0, total_size);
+      // void* buffer = vbo_proxy_->Map(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+      // FillVertexBufferInterleaved(buffer);
+      // vbo_proxy_->Unmap();
     }
     SetupVertexAttribFormat();
     glBindVertexBuffer(0, 0, 0, VertexAttribStride());
