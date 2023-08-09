@@ -35,6 +35,8 @@ def convert_json(json_obj):
 def main():
   src_dir = "assets/dumped_map_data"
   dst_dir = "assets/dumped_map_data_compact"
+  if not os.path.exists(dst_dir):
+    os.makedirs(dst_dir)
   files = os.listdir(src_dir)
   for f in files:
     input_fn = os.path.join(src_dir, f)
