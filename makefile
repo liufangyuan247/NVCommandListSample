@@ -26,29 +26,31 @@ CPPFLAGS=-lGLEW -lGL -lglfw -lpthread --std=c++17 -g -I. -lstdc++fs
 
 EXE_NAME = command_list_sample
 
+CXX = ccache g++
+
 $(EXE_NAME):$(OUTPUT_OBJS)
-	g++ -Wformat -Wint-to-pointer-cast $(OUTPUT_OBJS) $(CPPFLAGS) -o $@
+	$(CXX) -Wformat -Wint-to-pointer-cast $(OUTPUT_OBJS) $(CPPFLAGS) -o $@
 
 
 output/imgui/%.o: imgui/%.cpp $(IMGUI_HDRS)
 	mkdir -p output/imgui/
-	g++ -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
+	$(CXX) -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
 
 output/core/%.o: core/%.cpp $(IMGUI_HDRS) $(CORE_HDRS)
 	mkdir -p output/core/
-	g++ -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
+	$(CXX) -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
 
 output/app/%.o: app/%.cpp $(IMGUI_HDRS) $(CORE_HDRS) $(APP_HDRS) $(NVH_HDRS) $(NVGL_HDRS) 
 	mkdir -p output/app/ output/app/path
-	g++ -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
+	$(CXX) -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
 
 output/nvh/%.o: nvh/%.cpp $(NVH_HDRS)
 	mkdir -p output/nvh/
-	g++ -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
+	$(CXX) -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
 
 output/nvgl/%.o: nvgl/%.cpp $(NVH_HDRS) $(NVGL_HDRS)
 	mkdir -p output/nvgl/
-	g++ -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
+	$(CXX) -c -Wformat -Wint-to-pointer-cast $< $(CPPFLAGS) -o $@
 
 clean:
 	rm -f $(MY_OBJS)
